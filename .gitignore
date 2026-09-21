@@ -1,0 +1,26 @@
+# Local Kiro context and migration records
+.kiro/
+.reference/
+*semantic-review/
+
+# Python virtual environments
+.venv/
+venv/
+env/
+
+# Python caches and build artifacts
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+build/
+dist/
+*.egg-info/
+
+# Coverage and local tooling
+.coverage
+htmlcov/
+
+# Per-exercise generated databases
+exercises/ch-3-ex-*/database.sqlite3

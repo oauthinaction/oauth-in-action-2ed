@@ -1,0 +1,36 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Protected Data</title>
+  <link rel="stylesheet" href="/assets/common.css">
+  <script src="/assets/common.js" defer></script>
+</head>
+<body class="client">
+  <header class="site-header">
+    <div class="header-inner">
+      <a class="brand" href="/">OAuth in Action</a>
+      <span class="service-label">OAuth Client</span>
+    </div>
+  </header>
+  <main>
+    <p class="visually-hidden" data-copy-status aria-live="polite"></p>
+    <section class="panel">
+      <h1>Protected resource response</h1>
+      <div class="copyable-block" data-copy-container>
+        <pre data-copy-value
+          aria-label="Protected resource JSON">{{ resource | tojson(indent=2) }}</pre>
+        <button class="copy-button" type="button" data-copy-button
+          aria-label="Copy protected resource JSON"
+          title="Copy protected resource JSON">
+          <span class="copy-icon" aria-hidden="true"></span>
+        </button>
+      </div>
+      <div class="actions">
+        <a class="button button-secondary" href="/">Return to client</a>
+      </div>
+    </section>
+  </main>
+</body>
+</html>
