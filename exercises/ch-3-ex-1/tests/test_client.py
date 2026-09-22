@@ -1,6 +1,10 @@
 import pytest
+import requests
 
 from helpers import (
+    TEST_CODE_CHALLENGE,
+    TEST_CODE_VERIFIER,
+    generate_test_code_challenge,
     malformed_json_response,
     oauth_form_headers,
     oauth_response,
@@ -28,7 +32,51 @@ def test_basic_credentials_match_oauth_encoding(client_module):
     )
 
 
-def test_authorize_builds_registered_redirect(client_http):
+def test_client_generate_code_challenge_matches_rfc_7636(client_module):
+    assert generate_test_code_challenge(TEST_CODE_VERIFIER) == TEST_CODE_CHALLENGE
+    assert (
+        client_module.generate_code_challenge(TEST_CODE_VERIFIER)
+        == TEST_CODE_CHALLENGE
+    ), "Derive the RFC 7636 S256 challenge with base64url encoding and no padding"
+
+
+def test_generated_code_verifier_has_rfc_7636_strength_and_shape(client_module):
+    allowed_characters = frozenset(
+        "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
+        "abcdefghijklmnopqrstuvwxyz"
+        "0123456789-._~"
+    )
+    generated_verifiers = {
+        client_module.generate_code_verifier()
+        for _ in range(32)
+    }
+
+    assert len(generated_verifiers) == 32, (
+        "Generate a fresh cryptographically random PKCE verifier per authorization request"
+    )
+    for verifier in generated_verifiers:
+        assert 43 <= len(verifier) <= 128, (
+            "RFC 7636 code verifiers must contain between 43 and 128 characters"
+        )
+        assert set(verifier).issubset(allowed_characters), (
+            "RFC 7636 code verifiers may contain only unreserved characters"
+        )
+        challenge = client_module.generate_code_challenge(verifier)
+        assert len(challenge) == 43 and "=" not in challenge, (
+            "S256 challenges must be canonical unpadded base64url SHA-256 values"
+        )
+
+
+def test_authorize_builds_registered_redirect(
+    client_module,
+    client_http,
+    monkeypatch,
+):
+    monkeypatch.setattr(
+        client_module,
+        "generate_code_verifier",
+        lambda: TEST_CODE_VERIFIER,
+    )
     response = client_http.get("/authorize")
     assert response.status_code == 302, (
         "Configure the client credentials and redirect the browser to the authorization endpoint"
@@ -42,11 +90,18 @@ def test_authorize_builds_registered_redirect(client_http):
         "client_id",
         "redirect_uri",
         "state",
+        "code_challenge",
+        "code_challenge_method",
     }
     assert params["response_type"] == "code"
     assert params["client_id"] == "oauth-client-1"
     assert params["redirect_uri"] == "http://localhost:9000/callback"
     assert params["state"], "Generate and retain a non-empty OAuth state value"
+    assert params["code_challenge_method"] == "S256"
+    assert client_module.code_verifier == TEST_CODE_VERIFIER
+    assert params["code_challenge"] == generate_test_code_challenge(
+        client_module.code_verifier
+    ), "Bind the authorization request to the retained PKCE verifier"
 
 
 def test_callback_validates_state_and_posts_code_contract(
@@ -55,6 +110,7 @@ def test_callback_validates_state_and_posts_code_contract(
     requests_post,
 ):
     client_module.state = "expected-state"
+    client_module.code_verifier = TEST_CODE_VERIFIER
     requests_post.return_value = oauth_response(
         payload={"access_token": "access-123", "scope": "foo"}
     )
@@ -74,6 +130,7 @@ def test_callback_validates_state_and_posts_code_contract(
             "grant_type": "authorization_code",
             "code": "code-123",
             "redirect_uri": "http://localhost:9000/callback",
+            "code_verifier": TEST_CODE_VERIFIER,
         },
         headers=oauth_form_headers("oauth-client-1", "oauth-client-secret-1"),
         timeout=5,
@@ -81,6 +138,9 @@ def test_callback_validates_state_and_posts_code_contract(
     )
     assert client_module.state is None, (
         "Consume the OAuth state value after validation"
+    )
+    assert client_module.code_verifier is None, (
+        "Consume the PKCE verifier after the token request is prepared"
     )
     assert client_module.access_token == "access-123"
     assert client_module.scope == "foo"
@@ -113,6 +173,7 @@ def test_fetch_resource_sends_bearer_contract(
 
 def test_callback_rejects_state_mismatch(client_module, client_http, requests_post):
     client_module.state = "saved-state"
+    client_module.code_verifier = TEST_CODE_VERIFIER
     response = client_http.get(
         "/callback",
         query_string={"state": "different-state", "code": "unused"},
@@ -131,6 +192,7 @@ def test_callback_reports_malformed_token_json(
     requests_post,
 ):
     client_module.state = "saved-state"
+    client_module.code_verifier = TEST_CODE_VERIFIER
     requests_post.return_value = malformed_json_response()
     requests_post.side_effect = None
     response = client_http.get(
@@ -150,6 +212,7 @@ def test_callback_rejects_token_endpoint_redirect(
     requests_post,
 ):
     client_module.state = "saved-state"
+    client_module.code_verifier = TEST_CODE_VERIFIER
     client_module.access_token = None
     client_module.scope = None
     requests_post.return_value = oauth_response(
@@ -269,3 +332,44 @@ def test_index_renders_aligned_access_and_scope_rows(client_http):
     assert page.count('class="token value-missing">NONE</span>') == 2, (
         "Display aligned NONE values for both the access token and scope"
     )
+
+
+def test_callback_connection_failure_is_rendered_not_500(
+    client_module,
+    client_http,
+    requests_post,
+):
+    client_module.state = "saved-state"
+    client_module.code_verifier = TEST_CODE_VERIFIER
+    requests_post.side_effect = requests.ConnectionError("token endpoint unavailable")
+
+    response = client_http.get(
+        "/callback",
+        query_string={"state": "saved-state", "code": "code-123"},
+    )
+
+    if response.status_code == 501:
+        pytest.skip("Starter callback TODO blocks connection-failure handling")
+    assert response.status_code == 200, (
+        "Render a controlled token-endpoint error instead of returning HTTP 500"
+    )
+    assert b"Unable to fetch access token" in response.data
+
+
+def test_resource_connection_failure_is_rendered_not_500(
+    client_module,
+    client_http,
+    requests_post,
+):
+    client_module.access_token = "access-123"
+    requests_post.side_effect = requests.ConnectionError("resource unavailable")
+
+    response = client_http.get("/fetch_resource")
+
+    if response.status_code == 501:
+        pytest.skip("Starter resource TODO blocks connection-failure handling")
+    assert response.status_code == 200, (
+        "Render a controlled protected-resource error instead of returning HTTP 500"
+    )
+    assert b"Unable to fetch resource" in response.data
+    assert client_module.access_token is None

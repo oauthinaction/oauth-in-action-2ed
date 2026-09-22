@@ -29,3 +29,10 @@ No live services are required. Flask test clients call all three applications in
 Requests calls are replaced with `unittest.mock.Mock`, and every test receives a fresh temporary
 SQLite database. These boundaries keep the suite isolated from the network and persistent local
 data while checking the request contracts used by the exercise.
+## Manual service troubleshooting
+
+The automated suite does not need live services. For a manual browser flow, activate the same
+exercise `.venv` in every terminal and launch all three scripts from this exercise directory.
+Before starting, check that ports 9000, 9001, and 9002 are not owned by a sandbox, legacy copy, or
+another exercise; mixing source trees means the processes use different configuration and token
+stores.

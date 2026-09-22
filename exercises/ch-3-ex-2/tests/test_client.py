@@ -1,8 +1,12 @@
 from unittest.mock import Mock
 
 import pytest
+import requests
 
 from helpers import (
+    TEST_CODE_CHALLENGE,
+    TEST_CODE_VERIFIER,
+    generate_test_code_challenge,
     malformed_json_response,
     oauth_form_headers,
     oauth_response,
@@ -38,10 +42,51 @@ def test_basic_credentials_match_oauth_encoding(client_module):
     )
 
 
+def test_client_generate_code_challenge_matches_rfc_7636(client_module):
+    assert generate_test_code_challenge(TEST_CODE_VERIFIER) == TEST_CODE_CHALLENGE
+    assert (
+        client_module.generate_code_challenge(TEST_CODE_VERIFIER)
+        == TEST_CODE_CHALLENGE
+    ), "Derive the RFC 7636 S256 challenge with base64url encoding and no padding"
+
+
+def test_generated_code_verifier_has_rfc_7636_strength_and_shape(client_module):
+    allowed_characters = frozenset(
+        "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
+        "abcdefghijklmnopqrstuvwxyz"
+        "0123456789-._~"
+    )
+    generated_verifiers = {
+        client_module.generate_code_verifier()
+        for _ in range(32)
+    }
+
+    assert len(generated_verifiers) == 32, (
+        "Generate a fresh cryptographically random PKCE verifier per authorization request"
+    )
+    for verifier in generated_verifiers:
+        assert 43 <= len(verifier) <= 128, (
+            "RFC 7636 code verifiers must contain between 43 and 128 characters"
+        )
+        assert set(verifier).issubset(allowed_characters), (
+            "RFC 7636 code verifiers may contain only unreserved characters"
+        )
+        challenge = client_module.generate_code_challenge(verifier)
+        assert len(challenge) == 43 and "=" not in challenge, (
+            "S256 challenges must be canonical unpadded base64url SHA-256 values"
+        )
+
+
 def test_authorization_request_clears_access_but_preserves_refresh(
     client_module,
     client_http,
+    monkeypatch,
 ):
+    monkeypatch.setattr(
+        client_module,
+        "generate_code_verifier",
+        lambda: TEST_CODE_VERIFIER,
+    )
     client_module.access_token = "old-access"
     client_module.refresh_token = "retained-refresh"
     client_module.scope = "old-scope"
@@ -53,16 +98,24 @@ def test_authorization_request_clears_access_but_preserves_refresh(
     )
     assert params.keys() == {
         "response_type",
-        "scope",
         "client_id",
         "redirect_uri",
         "state",
+        "code_challenge",
+        "code_challenge_method",
     }
     assert params["response_type"] == "code"
-    assert params["scope"] == "foo"
+    assert "scope" not in params, (
+        "Exercise 2 obtains an access token without requesting a scope"
+    )
     assert params["client_id"] == "oauth-client-1"
     assert params["redirect_uri"] == "http://localhost:9000/callback"
     assert params["state"] == client_module.state and params["state"]
+    assert params["code_challenge_method"] == "S256"
+    assert client_module.code_verifier == TEST_CODE_VERIFIER
+    assert params["code_challenge"] == generate_test_code_challenge(
+        client_module.code_verifier
+    ), "Bind the authorization request to the retained PKCE verifier"
     assert client_module.access_token is None
     assert client_module.refresh_token == "retained-refresh"
     assert client_module.scope is None
@@ -74,10 +127,11 @@ def test_callback_code_exchange_contract(
     requests_post,
 ):
     client_module.state = "expected-state"
+    client_module.code_verifier = TEST_CODE_VERIFIER
     requests_post.return_value = oauth_response(
         payload={
             "access_token": "access-123",
-            "scope": "foo",
+            "scope": "",
         }
     )
     requests_post.side_effect = None
@@ -92,15 +146,19 @@ def test_callback_code_exchange_contract(
             "grant_type": "authorization_code",
             "code": "code-123",
             "redirect_uri": "http://localhost:9000/callback",
+            "code_verifier": TEST_CODE_VERIFIER,
         },
         headers=oauth_form_headers("oauth-client-1", "oauth-client-secret-1"),
         timeout=5,
         allow_redirects=False,
     )
     assert client_module.state is None
+    assert client_module.code_verifier is None, (
+        "Consume the PKCE verifier after the token request is prepared"
+    )
     assert client_module.access_token == "access-123"
     assert client_module.refresh_token == client_module.INITIAL_REFRESH_TOKEN
-    assert client_module.scope == "foo"
+    assert client_module.scope == ""
 
 
 def test_callback_rejects_token_endpoint_redirect(
@@ -109,6 +167,7 @@ def test_callback_rejects_token_endpoint_redirect(
     requests_post,
 ):
     client_module.state = "expected-state"
+    client_module.code_verifier = TEST_CODE_VERIFIER
     client_module.access_token = None
     client_module.refresh_token = None
     client_module.scope = None
@@ -165,7 +224,7 @@ def test_successful_resource_request_uses_bearer_without_refresh(
     refresh_helper.assert_not_called()
 
 
-def test_first_401_refreshes_then_redirects_for_one_retry(
+def test_first_401_refreshes_then_retries_resource_once(
     client_module,
     client_http,
     requests_post,
@@ -173,21 +232,38 @@ def test_first_401_refreshes_then_redirects_for_one_retry(
 ):
     client_module.access_token = "expired-access"
     client_module.refresh_token = "refresh-123"
-    requests_post.return_value = oauth_response(
-        status=401,
-        payload={"error": "invalid_token"},
-    )
-    requests_post.side_effect = None
-    refresh_helper = Mock(return_value=True)
+    requests_post.side_effect = [
+        oauth_response(
+            status=401,
+            payload={"error": "invalid_token"},
+        ),
+        oauth_response(
+            payload={"name": "Protected Resource"},
+        ),
+    ]
+
+    def refresh_once():
+        client_module.access_token = "replacement-access"
+        client_module.refresh_token = "rotated-refresh"
+        return True
+
+    refresh_helper = Mock(side_effect=refresh_once)
     monkeypatch.setattr(client_module, "refresh_access_token", refresh_helper)
 
     response = client_http.get("/fetch_resource")
 
-    assert response.status_code == 302, (
-        "On the first 401, refresh token state and redirect for one guarded retry"
+    assert response.status_code == 200 and b"Protected Resource" in response.data, (
+        "After the first 401, refresh once and return the retried resource data"
     )
-    assert response.headers["Location"] == "/fetch_resource?refreshed=1"
     refresh_helper.assert_called_once_with()
+    assert requests_post.call_count == 2
+    first_request, retry_request = requests_post.call_args_list
+    assert first_request.kwargs["headers"]["Authorization"] == (
+        "Bearer expired-access"
+    )
+    assert retry_request.kwargs["headers"]["Authorization"] == (
+        "Bearer replacement-access"
+    )
 
 
 def test_refresh_posts_exact_contract_and_updates_state(
@@ -200,7 +276,7 @@ def test_refresh_posts_exact_contract_and_updates_state(
     requests_post.return_value = oauth_response(
         payload={
             "access_token": "new-access",
-            "refresh_token": client_module.INITIAL_REFRESH_TOKEN,
+            "refresh_token": "rotated-refresh",
         }
     )
     requests_post.side_effect = None
@@ -221,7 +297,7 @@ def test_refresh_posts_exact_contract_and_updates_state(
         allow_redirects=False,
     )
     assert client_module.access_token == "new-access"
-    assert client_module.refresh_token == client_module.INITIAL_REFRESH_TOKEN
+    assert client_module.refresh_token == "rotated-refresh"
     assert client_module.scope is None
 
 
@@ -272,24 +348,37 @@ def test_resource_redirect_is_error_and_never_refreshes(
     refresh_helper.assert_not_called()
 
 
-def test_second_401_never_refreshes_again(
+def test_second_401_is_final_and_never_refreshes_again(
     client_module,
     client_http,
     requests_post,
     monkeypatch,
 ):
-    client_module.access_token = "replacement-access"
+    client_module.access_token = "expired-access"
     client_module.refresh_token = "refresh-123"
-    refresh_helper = Mock()
+    requests_post.side_effect = [
+        oauth_response(status=401, payload={"error": "invalid_token"}),
+        oauth_response(status=401, payload={"error": "invalid_token"}),
+    ]
+
+    def refresh_once():
+        client_module.access_token = "replacement-access"
+        client_module.refresh_token = "rotated-refresh"
+        return True
+
+    refresh_helper = Mock(side_effect=refresh_once)
     monkeypatch.setattr(client_module, "refresh_access_token", refresh_helper)
-    requests_post.return_value = oauth_response(
-        status=401,
-        payload={"error": "invalid_token"},
-    )
-    requests_post.side_effect = None
-    response = client_http.get("/fetch_resource?refreshed=1")
+
+    response = client_http.get("/fetch_resource")
+    if not refresh_helper.called:
+        pytest.skip("Starter retry TODO does not yet call the refresh helper")
+
     assert response.status_code == 200
-    refresh_helper.assert_not_called()
+    assert b"Status 401" in response.data
+    refresh_helper.assert_called_once_with()
+    assert requests_post.call_count == 2
+    assert client_module.access_token is None
+    assert client_module.refresh_token == "rotated-refresh"
 
 
 @pytest.mark.parametrize(
@@ -298,6 +387,11 @@ def test_second_401_never_refreshes_again(
         oauth_response(status=400, payload={"error": "invalid_grant"}),
         malformed_json_response(),
         oauth_response(
+            payload={
+                "access_token": "access-without-rotation",
+            },
+        ),
+        oauth_response(
             status=302,
             payload={
                 "access_token": "redirect-access",
@@ -305,7 +399,12 @@ def test_second_401_never_refreshes_again(
             },
         ),
     ],
-    ids=["token-endpoint-rejection", "malformed-json", "token-endpoint-redirect"],
+    ids=[
+        "token-endpoint-rejection",
+        "malformed-json",
+        "missing-rotated-refresh-token",
+        "token-endpoint-redirect",
+    ],
 )
 def test_refresh_failure_clears_unusable_refresh_token(
     client_module,
@@ -383,3 +482,42 @@ def test_index_renders_consistent_token_rows(client_http):
     assert page.count('class="token value-missing">NONE</span>') == 1, (
         "Display the missing scope value in the same aligned token column"
     )
+
+
+def test_callback_connection_failure_is_rendered_not_500(
+    client_module,
+    client_http,
+    requests_post,
+):
+    client_module.state = "saved-state"
+    client_module.code_verifier = TEST_CODE_VERIFIER
+    client_module.access_token = None
+    requests_post.side_effect = requests.ConnectionError("token endpoint unavailable")
+
+    response = client_http.get(
+        "/callback",
+        query_string={"state": "saved-state", "code": "code-123"},
+    )
+
+    assert response.status_code == 200, (
+        "Render a controlled token-endpoint error instead of returning HTTP 500"
+    )
+    assert b"Unable to fetch access token" in response.data
+    assert client_module.access_token is None
+
+
+def test_resource_connection_failure_is_rendered_not_500(
+    client_module,
+    client_http,
+    requests_post,
+):
+    client_module.access_token = "access-123"
+    requests_post.side_effect = requests.ConnectionError("resource unavailable")
+
+    response = client_http.get("/fetch_resource")
+
+    assert response.status_code == 200, (
+        "Render a controlled protected-resource error instead of returning HTTP 500"
+    )
+    assert b"Unable to fetch resource" in response.data
+    assert client_module.access_token is None

@@ -120,3 +120,44 @@ def find_access_token(access_token: str) -> AccessToken | None:
             (access_token,),
         ).fetchone()
     return AccessToken(**dict(row)) if row else None
+
+
+def rotate_refresh_token(
+    presented_refresh_token: str,
+    new_access_token: str,
+    new_refresh_token: str,
+    client_id: str,
+) -> RefreshToken | None:
+    """Atomically consume a refresh token and persist its replacements."""
+    initialize_schema()
+    with _connect() as connection:
+        connection.execute("BEGIN IMMEDIATE")
+        row = connection.execute(
+            """SELECT refresh_token, client_id, scope FROM refresh_tokens
+               WHERE refresh_token = ? AND client_id = ?""",
+            (presented_refresh_token, client_id),
+        ).fetchone()
+        if row is None:
+            return None
+
+        scope = row["scope"]
+        connection.execute(
+            "DELETE FROM refresh_tokens WHERE refresh_token = ?",
+            (presented_refresh_token,),
+        )
+        connection.execute(
+            """INSERT INTO access_tokens (access_token, client_id, scope)
+               VALUES (?, ?, ?)""",
+            (new_access_token, client_id, ""),
+        )
+        connection.execute(
+            """INSERT INTO refresh_tokens (refresh_token, client_id, scope)
+               VALUES (?, ?, ?)""",
+            (new_refresh_token, client_id, scope),
+        )
+
+    return RefreshToken(
+        refresh_token=new_refresh_token,
+        client_id=client_id,
+        scope=scope,
+    )

@@ -1,6 +1,7 @@
 """Starter client for Chapter 3 Exercise 1."""
 
 import base64
+import hashlib
 import hmac
 from pathlib import Path
 import secrets
@@ -35,6 +36,7 @@ REQUEST_TIMEOUT = 5
 
 # Deliberate single-user exercise shortcut: all browser users share this state.
 state: str | None = None
+code_verifier: str | None = None
 access_token: str | None = None
 scope: str | None = None
 
@@ -91,6 +93,20 @@ def new_state() -> str:
     return secrets.token_urlsafe(24)
 
 
+def generate_code_verifier() -> str:
+    """Create a fresh RFC 7636 code verifier."""
+    return secrets.token_urlsafe(32)
+
+
+def generate_code_challenge(verifier: str) -> str:
+    """Derive the unpadded S256 code challenge for a verifier."""
+    ascii_verifier = verifier.encode("ascii")
+    verifier_digest = hashlib.sha256(ascii_verifier).digest()
+    base64url_digest = base64.urlsafe_b64encode(verifier_digest)
+    padded_challenge = base64url_digest.decode("ascii")
+    return padded_challenge.rstrip("=")
+
+
 def todo(message: str) -> tuple[str, int]:
     return render_template("error.html", error=f"TODO: {message}"), 501
 
@@ -102,12 +118,12 @@ def index() -> str:
 
 @app.get("/authorize")
 def authorize() -> tuple[str, int]:
-    return todo("set the client credentials and build the authorization redirect.")
+    return todo("generate a verifier and build the S256 authorization redirect.")
 
 
 @app.get("/callback")
 def callback() -> tuple[str, int]:
-    return todo("validate state and exchange the authorization code for a token.")
+    return todo("validate state and exchange the code with the PKCE verifier.")
 
 
 @app.get("/fetch_resource")

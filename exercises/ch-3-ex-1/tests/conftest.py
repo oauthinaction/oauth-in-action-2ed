@@ -79,7 +79,7 @@ def resource_http():
 
 @pytest.fixture(autouse=True)
 def isolated_runtime(tmp_path, monkeypatch):
-    for name in ("state", "access_token", "scope"):
+    for name in ("state", "code_verifier", "access_token", "scope"):
         setattr(CLIENT, name, None)
     AUTHORIZATION_SERVER.approval_requests.clear()
     AUTHORIZATION_SERVER.authorization_codes.clear()
@@ -94,7 +94,7 @@ def isolated_runtime(tmp_path, monkeypatch):
     monkeypatch.setattr(CLIENT.requests, "post", guarded_post)
     yield guarded_post
 
-    for name in ("state", "access_token", "scope"):
+    for name in ("state", "code_verifier", "access_token", "scope"):
         setattr(CLIENT, name, None)
     AUTHORIZATION_SERVER.approval_requests.clear()
     AUTHORIZATION_SERVER.authorization_codes.clear()

@@ -1,6 +1,7 @@
 """Starter client for Chapter 3 Exercise 2."""
 
 import base64
+import hashlib
 import hmac
 from pathlib import Path
 import secrets
@@ -26,7 +27,6 @@ CLIENT = {
     "client_id": "oauth-client-1",
     "client_secret": "oauth-client-secret-1",
     "redirect_uris": ["http://localhost:9000/callback"],
-    "scope": "foo",
 }
 PROTECTED_RESOURCE = "http://localhost:9002/resource"
 REQUEST_TIMEOUT = 5
@@ -38,6 +38,7 @@ INITIAL_REFRESH_TOKEN = "j2r3oj32r23rmasd98uhjrk2o3i"
 
 # Deliberate single-user exercise shortcut: all browser users share this state.
 state: str | None = None
+code_verifier: str | None = None
 access_token: str | None = INITIAL_ACCESS_TOKEN
 scope: str | None = None
 refresh_token: str | None = INITIAL_REFRESH_TOKEN
@@ -91,6 +92,20 @@ def response_json(response: requests.Response) -> dict[str, Any] | None:
     return body if isinstance(body, dict) else None
 
 
+def generate_code_verifier() -> str:
+    """Create a fresh RFC 7636 code verifier."""
+    return secrets.token_urlsafe(32)
+
+
+def generate_code_challenge(verifier: str) -> str:
+    """Derive the unpadded S256 code challenge for a verifier."""
+    ascii_verifier = verifier.encode("ascii")
+    verifier_digest = hashlib.sha256(ascii_verifier).digest()
+    base64url_digest = base64.urlsafe_b64encode(verifier_digest)
+    padded_challenge = base64url_digest.decode("ascii")
+    return padded_challenge.rstrip("=")
+
+
 @app.get("/")
 def index() -> str:
     return render_template(
@@ -103,16 +118,19 @@ def index() -> str:
 
 @app.get("/authorize")
 def authorize() -> Response:
-    global access_token, scope, state
+    global access_token, code_verifier, scope, state
     access_token = None
     scope = None
     state = secrets.token_urlsafe(24)
+    code_verifier = generate_code_verifier()
+    code_challenge = generate_code_challenge(code_verifier)
     authorization_params = {
         "response_type": "code",
-        "scope": CLIENT["scope"],
         "client_id": CLIENT["client_id"],
         "redirect_uri": CLIENT["redirect_uris"][0],
         "state": state,
+        "code_challenge": code_challenge,
+        "code_challenge_method": "S256",
     }
     authorization_url = build_url(
         AUTH_SERVER["authorization_endpoint"], authorization_params
@@ -122,15 +140,20 @@ def authorize() -> Response:
 
 @app.get("/callback")
 def callback() -> str | tuple[str, int]:
-    global access_token, refresh_token, scope, state
+    global access_token, code_verifier, refresh_token, scope, state
     returned_state = request.args.get("state")
     if state is None or returned_state is None or not states_match(state, returned_state):
         return client_error("State value did not match")
+
+    current_code_verifier = code_verifier
     state = None
+    code_verifier = None
 
     authorization_error = request.args.get("error")
     if authorization_error:
         return client_error(authorization_error)
+    if current_code_verifier is None:
+        return client_error("Missing PKCE code verifier")
 
     code = request.args.get("code")
     if not code:
@@ -140,6 +163,7 @@ def callback() -> str | tuple[str, int]:
         "grant_type": "authorization_code",
         "code": code,
         "redirect_uri": CLIENT["redirect_uris"][0],
+        "code_verifier": current_code_verifier,
     }
     basic_credentials = encode_client_credentials(
         CLIENT["client_id"], CLIENT["client_secret"]
@@ -203,12 +227,14 @@ def fetch_resource() -> str | tuple[str, int]:
         if not resource_request_succeeded:
             access_token = None
             if resource_response.status_code == 401:
-                # Learner TODO, retry orchestration milestone:
-                # - When refresh_token exists and refreshed is not already "1",
-                #   call refresh_access_token() and save its boolean result.
-                # - If it returns True, build /fetch_resource?refreshed=1 and
-                #   return that retry redirect from this caller.
-                # - If it returns False, render "Unable to refresh token."
+                # Learner TODO, bounded retry orchestration milestone:
+                # - When refresh_token exists, call refresh_access_token() once
+                #   and save its boolean result.
+                # - If it returns True, rebuild the Bearer header with the new
+                #   access_token and make one final protected-resource POST.
+                # - Render that second response as the final result; do not
+                #   redirect, recurse, or attempt another refresh.
+                # - If refresh returns False, render "Unable to refresh token."
                 pass
             return client_error(
                 f"Unable to fetch resource. Status {resource_response.status_code}"
@@ -225,7 +251,7 @@ def fetch_resource() -> str | tuple[str, int]:
 
 
 def refresh_access_token() -> bool:
-    """Learner TODO: exchange refresh_token and update token state; return success."""
+    """Learner TODO: exchange and store both rotated tokens; return success."""
     return False
 
 

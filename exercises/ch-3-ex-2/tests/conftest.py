@@ -80,6 +80,7 @@ def resource_http():
 @pytest.fixture(autouse=True)
 def isolated_runtime(tmp_path, monkeypatch):
     CLIENT.state = None
+    CLIENT.code_verifier = None
     CLIENT.access_token = CLIENT.INITIAL_ACCESS_TOKEN
     CLIENT.scope = None
     CLIENT.refresh_token = CLIENT.INITIAL_REFRESH_TOKEN
@@ -102,6 +103,7 @@ def isolated_runtime(tmp_path, monkeypatch):
     yield guarded_post
 
     CLIENT.state = None
+    CLIENT.code_verifier = None
     CLIENT.access_token = CLIENT.INITIAL_ACCESS_TOKEN
     CLIENT.scope = None
     CLIENT.refresh_token = CLIENT.INITIAL_REFRESH_TOKEN

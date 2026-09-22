@@ -1,4 +1,6 @@
 from helpers import (
+    TEST_CODE_CHALLENGE,
+    TEST_CODE_VERIFIER,
     issue_authorization_code,
     oauth_form_headers,
     redirect_query,
@@ -10,15 +12,56 @@ CLIENT_SECRET = "oauth-client-secret-1"
 REDIRECT_URI = "http://localhost:9000/callback"
 
 
-def redeem_code(authorization_http, code, redirect_uri=REDIRECT_URI):
+def redeem_code(
+    authorization_http,
+    code,
+    redirect_uri=REDIRECT_URI,
+    code_verifier=TEST_CODE_VERIFIER,
+):
+    form_data = {
+        "grant_type": "authorization_code",
+        "code": code,
+        "redirect_uri": redirect_uri,
+    }
+    if code_verifier is not None:
+        form_data["code_verifier"] = code_verifier
     return authorization_http.post(
         "/token",
-        data={
-            "grant_type": "authorization_code",
-            "code": code,
-            "redirect_uri": redirect_uri,
-        },
+        data=form_data,
         headers=oauth_form_headers(CLIENT_ID, CLIENT_SECRET),
+    )
+
+
+def test_server_pkce_helpers_match_rfc_7636(authorization_server):
+    assert (
+        authorization_server.generate_code_challenge(TEST_CODE_VERIFIER)
+        == TEST_CODE_CHALLENGE
+    )
+    assert authorization_server.validate_code_challenge(
+        TEST_CODE_CHALLENGE,
+        "S256",
+    )
+    assert authorization_server.validate_code_verifier(
+        TEST_CODE_VERIFIER,
+        TEST_CODE_CHALLENGE,
+    )
+    for invalid_verifier in (None, "short", "a" * 129, "a" * 42 + "!", "é" * 43):
+        assert authorization_server.generate_code_challenge(invalid_verifier) is None
+    assert not authorization_server.validate_code_challenge(
+        TEST_CODE_CHALLENGE,
+        "plain",
+    )
+    assert not authorization_server.validate_code_challenge("invalid=challenge", "S256")
+    assert not authorization_server.validate_code_verifier(
+        "x" * 43,
+        TEST_CODE_CHALLENGE,
+    )
+
+
+def test_server_rejects_non_canonical_base64url_challenge(authorization_server):
+    assert not authorization_server.validate_code_challenge(
+        "A" * 42 + "B",
+        "S256",
     )
 
 
@@ -90,6 +133,55 @@ def test_invalid_scope_uses_only_the_trusted_redirect_and_preserves_state(
     assert params == {"error": "invalid_scope", "state": "scope-state"}
 
 
+def test_invalid_pkce_authorization_requests_use_trusted_redirect(
+    authorization_http,
+    authorization_server,
+):
+    cases = (
+        ({}, "missing challenge and method"),
+        ({"code_challenge": TEST_CODE_CHALLENGE}, "missing method"),
+        (
+            {
+                "code_challenge": TEST_CODE_CHALLENGE,
+                "code_challenge_method": "plain",
+            },
+            "plain method",
+        ),
+        (
+            {
+                "code_challenge": "malformed=challenge",
+                "code_challenge_method": "S256",
+            },
+            "malformed challenge",
+        ),
+        (
+            {
+                "code_challenge": "A" * 42 + "B",
+                "code_challenge_method": "S256",
+            },
+            "non-canonical challenge",
+        ),
+    )
+    for pkce_parameters, description in cases:
+        query = {
+            "response_type": "code",
+            "client_id": CLIENT_ID,
+            "redirect_uri": REDIRECT_URI,
+            "scope": "foo",
+            "state": "pkce-state",
+        }
+        query.update(pkce_parameters)
+        response = authorization_http.get("/authorize", query_string=query)
+        parsed, params = redirect_query(response)
+
+        assert response.status_code == 302, f"Reject {description} as invalid_request"
+        assert parsed.geturl().startswith(REDIRECT_URI + "?")
+        assert params == {"error": "invalid_request", "state": "pkce-state"}
+        assert not authorization_server.approval_requests, (
+            "Do not save an approval request until PKCE parameters are valid"
+        )
+
+
 def test_approval_request_is_one_use(authorization_http, authorization_server):
     authorization_http.get(
         "/authorize",
@@ -98,6 +190,8 @@ def test_approval_request_is_one_use(authorization_http, authorization_server):
             "client_id": CLIENT_ID,
             "redirect_uri": REDIRECT_URI,
             "state": "approval-state",
+            "code_challenge": TEST_CODE_CHALLENGE,
+            "code_challenge_method": "S256",
         },
     )
     request_id = next(iter(authorization_server.approval_requests))
@@ -148,6 +242,31 @@ def test_wrong_redirect_does_not_consume_authorization_code(
     assert rejected.get_json() == {"error": "invalid_grant"}
     assert accepted.status_code == 200, (
         "Validate redirect_uri before consuming the authorization code"
+    )
+
+
+def test_pkce_failures_do_not_consume_authorization_code(
+    authorization_http,
+    authorization_server,
+):
+    code, _, _ = issue_authorization_code(authorization_http, authorization_server)
+    missing = redeem_code(authorization_http, code, code_verifier=None)
+    wrong = redeem_code(authorization_http, code, code_verifier="x" * 43)
+    accepted = redeem_code(authorization_http, code)
+    replay = redeem_code(authorization_http, code)
+
+    for response, description in (
+        (missing, "missing verifier"),
+        (wrong, "wrong verifier"),
+    ):
+        assert response.status_code == 400, f"Reject a {description} as invalid_grant"
+        assert response.get_json() == {"error": "invalid_grant"}
+    assert accepted.status_code == 200, (
+        "A wrong verifier must not consume the code before the correct verifier arrives"
+    )
+    assert replay.status_code == 400
+    assert replay.get_json() == {"error": "invalid_grant"}, (
+        "Consume the authorization code after successful PKCE validation"
     )
 
 

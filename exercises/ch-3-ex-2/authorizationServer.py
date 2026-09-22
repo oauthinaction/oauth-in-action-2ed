@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import base64
 import binascii
+import hashlib
 import hmac
 from pathlib import Path
 import secrets
@@ -14,10 +15,10 @@ from flask import Flask, Response, jsonify, redirect, render_template, request
 
 from oauth_store import (
     DatabaseError,
-    find_refresh_token,
     insert_access_token,
     insert_refresh_token,
     reset_schema,
+    rotate_refresh_token,
 )
 
 
@@ -43,12 +44,24 @@ CLIENTS = [
 
 # Explicit Exercise 2 fixture recognized before any authorization-code flow.
 PRECONFIGURED_REFRESH_TOKEN = "j2r3oj32r23rmasd98uhjrk2o3i"
+PKCE_VERIFIER_CHARACTERS = frozenset(
+    "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
+    "abcdefghijklmnopqrstuvwxyz"
+    "0123456789-._~"
+)
+PKCE_CHALLENGE_CHARACTERS = frozenset(
+    "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
+    "abcdefghijklmnopqrstuvwxyz"
+    "0123456789-_"
+)
 
 
 class AuthorizationCode(TypedDict):
     client_id: str
     redirect_uri: str
     scope: list[str]
+    code_challenge: str
+    code_challenge_method: str
 
 
 # Deliberately in memory: Chapter 3 focuses on the protocol, not durable grants.
@@ -60,7 +73,9 @@ def build_url(base: str, parameters: dict[str, str | None]) -> str:
     """Add query parameters without discarding parameters already in the URL."""
     parts = urlsplit(base)
     query = dict(parse_qsl(parts.query, keep_blank_values=True))
-    query.update({key: value for key, value in parameters.items() if value is not None})
+    query.update(
+        {key: value for key, value in parameters.items() if value is not None}
+    )
     return urlunsplit(
         (parts.scheme, parts.netloc, parts.path, urlencode(query), parts.fragment)
     )
@@ -111,6 +126,71 @@ def basic_credentials(header: str | None) -> tuple[tuple[str, str] | None, bool]
         return None, True
 
 
+def generate_code_challenge(code_verifier: str) -> str | None:
+    """Derive an unpadded S256 challenge from a valid PKCE verifier."""
+    if not isinstance(code_verifier, str):
+        return None
+    if not 43 <= len(code_verifier) <= 128:
+        return None
+    if any(character not in PKCE_VERIFIER_CHARACTERS for character in code_verifier):
+        return None
+    try:
+        ascii_verifier = code_verifier.encode("ascii")
+    except UnicodeEncodeError:
+        return None
+    verifier_digest = hashlib.sha256(ascii_verifier).digest()
+    base64url_digest = base64.urlsafe_b64encode(verifier_digest)
+    padded_challenge = base64url_digest.decode("ascii")
+    return padded_challenge.rstrip("=")
+
+
+def validate_code_challenge(
+    code_challenge: str | None,
+    method: str | None,
+) -> bool:
+    """Accept only a canonical 43-character S256 challenge."""
+    if method != "S256":
+        return False
+    if not isinstance(code_challenge, str):
+        return False
+    if len(code_challenge) != 43:
+        return False
+    if any(
+        character not in PKCE_CHALLENGE_CHARACTERS
+        for character in code_challenge
+    ):
+        return False
+
+    restored_padding = "=" * (-len(code_challenge) % 4)
+    padded_challenge = code_challenge + restored_padding
+    try:
+        decoded_challenge = base64.urlsafe_b64decode(padded_challenge)
+    except (binascii.Error, ValueError):
+        return False
+    if len(decoded_challenge) != 32:
+        return False
+
+    canonical_bytes = base64.urlsafe_b64encode(decoded_challenge)
+    canonical_challenge = canonical_bytes.decode("ascii").rstrip("=")
+    return canonical_challenge == code_challenge
+
+
+def validate_code_verifier(
+    code_verifier: str | None,
+    expected_challenge: str,
+) -> bool:
+    """Compare a valid verifier's challenge with the stored challenge."""
+    generated_challenge = generate_code_challenge(code_verifier)
+    if generated_challenge is None:
+        return False
+    try:
+        generated_bytes = generated_challenge.encode("ascii")
+        expected_bytes = expected_challenge.encode("ascii")
+    except (AttributeError, UnicodeEncodeError):
+        return False
+    return hmac.compare_digest(generated_bytes, expected_bytes)
+
+
 def redirect_error(callback: str, error: str, state: str | None) -> Response:
     return redirect(build_url(callback, {"error": error, "state": state}))
 
@@ -133,7 +213,20 @@ def authorize() -> Response | str:
     requested_scope = request.args.get("scope", "").split()
     allowed_scope = set(client["scope"].split())
     if not set(requested_scope).issubset(allowed_scope):
-        return redirect_error(redirect_uri, "invalid_scope", request.args.get("state"))
+        return redirect_error(
+            redirect_uri,
+            "invalid_scope",
+            request.args.get("state"),
+        )
+
+    code_challenge = request.args.get("code_challenge")
+    challenge_method = request.args.get("code_challenge_method")
+    if not validate_code_challenge(code_challenge, challenge_method):
+        return redirect_error(
+            redirect_uri,
+            "invalid_request",
+            request.args.get("state"),
+        )
 
     request_id = secrets.token_urlsafe(18)
     approval_requests[request_id] = request.args.to_dict()
@@ -173,6 +266,8 @@ def approve() -> Response | str:
         "client_id": saved_request["client_id"],
         "redirect_uri": callback,
         "scope": granted_scope,
+        "code_challenge": saved_request["code_challenge"],
+        "code_challenge_method": saved_request["code_challenge_method"],
     }
     return redirect(build_url(callback, {"code": code, "state": state}))
 
@@ -184,9 +279,8 @@ def authenticate_client(
         request.headers.get("Authorization")
     )
     body_supplied = "client_id" in body or "client_secret" in body
-    if (header_supplied and body_supplied) or (
-        header_supplied and header_credentials is None
-    ):
+    invalid_header = header_supplied and header_credentials is None
+    if (header_supplied and body_supplied) or invalid_header:
         return None, oauth_error("invalid_client", 401)
 
     credentials = header_credentials
@@ -231,6 +325,12 @@ def token() -> tuple[Response, int] | Response:
         ):
             return oauth_error("invalid_grant")
 
+        if not validate_code_verifier(
+            body.get("code_verifier"),
+            code["code_challenge"],
+        ):
+            return oauth_error("invalid_grant")
+
         del authorization_codes[code_value]
         access_token = secrets.token_urlsafe(32)
         scope = " ".join(code["scope"])
@@ -245,29 +345,28 @@ def token() -> tuple[Response, int] | Response:
         )
 
     if body.get("grant_type") == "refresh_token":
-        refresh_value = body.get("refresh_token")
-        refresh_record = None
-        if isinstance(refresh_value, str):
-            try:
-                refresh_record = find_refresh_token(refresh_value)
-            except DatabaseError:
-                return temporarily_unavailable()
-        if (
-            refresh_value != PRECONFIGURED_REFRESH_TOKEN
-            or refresh_record is None
-            or refresh_record["client_id"] != client["client_id"]
-        ):
+        presented_refresh_token = body.get("refresh_token")
+        if not isinstance(presented_refresh_token, str):
             return oauth_error("invalid_grant")
 
-        access_token = secrets.token_urlsafe(32)
+        new_access_token = secrets.token_urlsafe(32)
+        new_refresh_token = secrets.token_urlsafe(32)
         try:
-            insert_access_token(access_token, client["client_id"], "")
+            rotated_refresh_token = rotate_refresh_token(
+                presented_refresh_token,
+                new_access_token,
+                new_refresh_token,
+                client["client_id"],
+            )
         except DatabaseError:
             return temporarily_unavailable()
+        if rotated_refresh_token is None:
+            return oauth_error("invalid_grant")
+
         return jsonify(
-            access_token=access_token,
+            access_token=new_access_token,
             token_type="Bearer",
-            refresh_token=refresh_record["refresh_token"],
+            refresh_token=new_refresh_token,
         )
 
     return oauth_error("unsupported_grant_type")

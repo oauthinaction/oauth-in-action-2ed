@@ -25,14 +25,23 @@ completed work in place and never loads `completed/client.py`; that directory is
 key.
 
 An initial exercise implementation is expected to report two milestone failures: making
-`refresh_access_token()` exchange the refresh token, update token state, and return a success
-boolean; and making `fetch_resource()` own error rendering plus one guarded retry redirect after a
-successful refresh. Secondary refresh error cases blocked while the root refresh stub makes no
-Requests call are skipped. As each milestone is implemented in the root `client.py`, the goal is
-for every test to pass.
+`refresh_access_token()` exchange the refresh token, require and store both rotated token values,
+update scope, and return a success boolean; and making `fetch_resource()` own error rendering plus
+one explicit protected-resource retry in the same request after a successful refresh. The old
+refresh token is single-use: the authorization server atomically replaces it, and only the rotated
+refresh token can be used again. Secondary refresh error cases blocked while the root refresh stub
+makes no Requests call are skipped. As each milestone is implemented in the root `client.py`, the
+goal is for every test to pass.
 
 No live services are required. Flask test clients call all three applications in process, outbound
 Requests calls are replaced with `unittest.mock.Mock`, and every test receives a fresh temporary
 SQLite database with the preconfigured refresh fixture seeded synchronously. These boundaries
 isolate the suite from the network and persistent local data while checking the request contracts
 used by the exercise.
+## Manual service troubleshooting
+
+The automated suite does not need live services. For a manual browser flow, activate the same
+exercise `.venv` in every terminal and launch all three scripts from this exercise directory.
+Before starting, check that ports 9000, 9001, and 9002 are not owned by a sandbox, legacy copy, or
+another exercise; mixing source trees means the processes use different configuration and token
+stores.

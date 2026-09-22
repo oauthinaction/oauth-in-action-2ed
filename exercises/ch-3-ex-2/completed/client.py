@@ -1,6 +1,7 @@
 """Completed refresh-token client for Chapter 3 Exercise 2."""
 
 import base64
+import hashlib
 import hmac
 from pathlib import Path
 import secrets
@@ -28,7 +29,6 @@ CLIENT = {
     "client_id": "oauth-client-1",
     "client_secret": "oauth-client-secret-1",
     "redirect_uris": ["http://localhost:9000/callback"],
-    "scope": "foo",
 }
 PROTECTED_RESOURCE = "http://localhost:9002/resource"
 REQUEST_TIMEOUT = 5
@@ -40,6 +40,7 @@ INITIAL_REFRESH_TOKEN = "j2r3oj32r23rmasd98uhjrk2o3i"
 
 # Deliberate single-user exercise shortcut: all browser users share this state.
 state: str | None = None
+code_verifier: str | None = None
 access_token: str | None = INITIAL_ACCESS_TOKEN
 scope: str | None = None
 refresh_token: str | None = INITIAL_REFRESH_TOKEN
@@ -93,6 +94,20 @@ def response_json(response: requests.Response) -> dict[str, Any] | None:
     return body if isinstance(body, dict) else None
 
 
+def generate_code_verifier() -> str:
+    """Create a fresh RFC 7636 code verifier."""
+    return secrets.token_urlsafe(32)
+
+
+def generate_code_challenge(verifier: str) -> str:
+    """Derive the unpadded S256 code challenge for a verifier."""
+    ascii_verifier = verifier.encode("ascii")
+    verifier_digest = hashlib.sha256(ascii_verifier).digest()
+    base64url_digest = base64.urlsafe_b64encode(verifier_digest)
+    padded_challenge = base64url_digest.decode("ascii")
+    return padded_challenge.rstrip("=")
+
+
 def client_index() -> str:
     return render_template(
         "index.html",
@@ -109,16 +124,19 @@ def index() -> str:
 
 @app.get("/authorize")
 def authorize() -> Response:
-    global access_token, scope, state
+    global access_token, code_verifier, scope, state
     access_token = None
     scope = None
     state = secrets.token_urlsafe(24)
+    code_verifier = generate_code_verifier()
+    code_challenge = generate_code_challenge(code_verifier)
     authorization_params = {
         "response_type": "code",
-        "scope": CLIENT["scope"],
         "client_id": CLIENT["client_id"],
         "redirect_uri": CLIENT["redirect_uris"][0],
         "state": state,
+        "code_challenge": code_challenge,
+        "code_challenge_method": "S256",
     }
     authorization_url = build_url(
         AUTH_SERVER["authorization_endpoint"], authorization_params
@@ -128,15 +146,20 @@ def authorize() -> Response:
 
 @app.get("/callback")
 def callback() -> str | tuple[str, int]:
-    global access_token, refresh_token, scope, state
+    global access_token, code_verifier, refresh_token, scope, state
     returned_state = request.args.get("state")
     if state is None or returned_state is None or not states_match(state, returned_state):
         return client_error("State value did not match")
+
+    current_code_verifier = code_verifier
     state = None
+    code_verifier = None
 
     authorization_error = request.args.get("error")
     if authorization_error:
         return client_error(authorization_error)
+    if current_code_verifier is None:
+        return client_error("Missing PKCE code verifier")
 
     code = request.args.get("code")
     if not code:
@@ -146,6 +169,7 @@ def callback() -> str | tuple[str, int]:
         "grant_type": "authorization_code",
         "code": code,
         "redirect_uri": CLIENT["redirect_uris"][0],
+        "code_verifier": current_code_verifier,
     }
     basic_credentials = encode_client_credentials(
         CLIENT["client_id"], CLIENT["client_secret"]
@@ -187,7 +211,7 @@ def callback() -> str | tuple[str, int]:
 
 
 @app.get("/fetch_resource")
-def fetch_resource() -> str | tuple[str, int] | Response:
+def fetch_resource() -> str | tuple[str, int]:
     global access_token
     headers = {
         "Authorization": f"Bearer {access_token}",
@@ -200,33 +224,61 @@ def fetch_resource() -> str | tuple[str, int] | Response:
             timeout=REQUEST_TIMEOUT,
             allow_redirects=False,
         )
-        resource_request_succeeded = 200 <= resource_response.status_code < 300
-        if resource_request_succeeded:
-            resource_response.raise_for_status()
-            resource_body = response_json(resource_response)
-            if resource_body is None:
-                return client_error("Protected resource returned invalid JSON")
-            return render_template("data.html", resource=resource_body)
     except requests.RequestException as error:
         return client_error(f"Unable to fetch resource: {error}")
 
-    if resource_response.status_code == 401:
-        access_token = None
-        already_refreshed = request.args.get("refreshed") == "1"
-        if refresh_token and not already_refreshed:
-            token_refreshed = refresh_access_token()
-            if token_refreshed:
-                retry_params = {"refreshed": "1"}
-                retry_url = build_url("/fetch_resource", retry_params)
-                return redirect(retry_url)
-            return client_error("Unable to refresh token.")
-    return client_error(
-        f"Unable to fetch resource. Status {resource_response.status_code}"
-    )
+    resource_request_succeeded = 200 <= resource_response.status_code < 300
+    if resource_request_succeeded:
+        resource_response.raise_for_status()
+        resource_body = response_json(resource_response)
+        if resource_body is None:
+            return client_error("Protected resource returned invalid JSON")
+        return render_template("data.html", resource=resource_body)
+
+    if resource_response.status_code != 401:
+        return client_error(
+            f"Unable to fetch resource. Status {resource_response.status_code}"
+        )
+
+    access_token = None
+    if not refresh_token:
+        return client_error("Unable to fetch resource. Status 401")
+
+    token_refreshed = refresh_access_token()
+    if not token_refreshed:
+        return client_error("Unable to refresh token.")
+
+    retry_headers = {
+        "Authorization": f"Bearer {access_token}",
+        "Content-Type": "application/x-www-form-urlencoded",
+    }
+    try:
+        retry_response = requests.post(
+            PROTECTED_RESOURCE,
+            headers=retry_headers,
+            timeout=REQUEST_TIMEOUT,
+            allow_redirects=False,
+        )
+    except requests.RequestException as error:
+        return client_error(f"Unable to fetch resource: {error}")
+
+    retry_succeeded = 200 <= retry_response.status_code < 300
+    if not retry_succeeded:
+        if retry_response.status_code == 401:
+            access_token = None
+        return client_error(
+            f"Unable to fetch resource. Status {retry_response.status_code}"
+        )
+
+    retry_response.raise_for_status()
+    resource_body = response_json(retry_response)
+    if resource_body is None:
+        return client_error("Protected resource returned invalid JSON")
+    return render_template("data.html", resource=resource_body)
 
 
 def refresh_access_token() -> bool:
-    """Exchange the retained refresh token and update module-level token state."""
+    """Exchange and rotate refresh-token state for a new access token."""
     global access_token, refresh_token, scope
     if not refresh_token:
         return False
@@ -261,15 +313,19 @@ def refresh_access_token() -> bool:
 
     token_body = response_json(token_response)
     returned_access_token = token_body.get("access_token") if token_body else None
-    if not isinstance(returned_access_token, str):
+    returned_refresh_token = token_body.get("refresh_token") if token_body else None
+    if (
+        not isinstance(returned_access_token, str)
+        or not returned_access_token
+        or not isinstance(returned_refresh_token, str)
+        or not returned_refresh_token
+    ):
         refresh_token = None
         return False
-    returned_refresh_token = token_body.get("refresh_token")
-    returned_scope = token_body.get("scope")
 
+    returned_scope = token_body.get("scope")
     access_token = returned_access_token
-    if isinstance(returned_refresh_token, str):
-        refresh_token = returned_refresh_token
+    refresh_token = returned_refresh_token
     scope = returned_scope if isinstance(returned_scope, str) else None
     return True
 
