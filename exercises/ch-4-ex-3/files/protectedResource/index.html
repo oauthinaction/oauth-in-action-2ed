@@ -1,0 +1,57 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Produce Protected Resource</title>
+  <link rel="stylesheet" href="/assets/common.css">
+  <script src="/assets/common.js" defer></script>
+</head>
+<body class="resource">
+  <header class="site-header">
+    <div class="header-inner">
+      <a class="brand" href="/">OAuth in Action</a>
+      <span class="service-label">Produce Resource - localhost:9002</span>
+    </div>
+  </header>
+  <main>
+    <p class="visually-hidden" data-copy-status aria-live="polite"></p>
+    <section class="panel">
+      <h1>Produce protected resource</h1>
+      <p>
+        This server exposes the OAuth-protected endpoint
+        <span class="copyable-inline" data-copy-container>
+          <code data-copy-value>GET http://localhost:9002/produce</code>
+          <button class="copy-button" type="button" data-copy-button
+            aria-label="Copy Produce API request" title="Copy Produce API request">
+            <span class="copy-icon" aria-hidden="true"></span>
+          </button>
+        </span>.
+      </p>
+      <p>
+        Send a valid access token in an
+        <span class="copyable-inline" data-copy-container>
+          <code data-copy-value>Authorization: Bearer ACCESS_TOKEN</code>
+          <button class="copy-button" type="button" data-copy-button
+            aria-label="Copy Authorization header example"
+            title="Copy Authorization header example">
+            <span class="copy-icon" aria-hidden="true"></span>
+          </button>
+        </span>
+        header. Invalid tokens receive a structured
+        <code>401 invalid_token</code> response.
+      </p>
+      <p>
+        The exercise is to filter the response by exact scope membership:
+        <code>fruit</code>, <code>veggies</code>, and <code>meats</code> each
+        control their matching list independently. A valid token still receives
+        <code>200</code> and all three keys; ungranted categories are empty.
+      </p>
+      <p class="muted">
+        The OAuth client performs this call server-to-server, so no browser CORS
+        library or external asset is required.
+      </p>
+    </section>
+  </main>
+</body>
+</html>

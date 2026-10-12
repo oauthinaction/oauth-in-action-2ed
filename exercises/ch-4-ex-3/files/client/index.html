@@ -1,0 +1,80 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Produce API Client</title>
+  <link rel="stylesheet" href="/assets/common.css">
+  <script src="/assets/common.js" defer></script>
+</head>
+<body class="client">
+  <header class="site-header">
+    <div class="header-inner">
+      <a class="brand" href="/">OAuth in Action</a>
+      <span class="service-label">Produce API Client - localhost:9000</span>
+    </div>
+  </header>
+  <main>
+    <p class="visually-hidden" data-copy-status aria-live="polite"></p>
+    <section class="panel">
+      <h1>OAuth Client</h1>
+      <p class="muted">
+        Request access to fruit, veggies, and meats, narrow the grant on the
+        approval screen, then call the protected Produce API.
+      </p>
+      <dl>
+        <dt>Access token</dt>
+        <dd>
+          {% if access_token %}
+            <span class="copyable-inline" data-copy-container>
+              <span class="token" data-copy-value>{{ access_token }}</span>
+              <button class="copy-button" type="button" data-copy-button
+                aria-label="Copy access token" title="Copy access token">
+                <span class="copy-icon" aria-hidden="true"></span>
+              </button>
+            </span>
+          {% else %}
+            <span class="token value-missing">NONE</span>
+          {% endif %}
+        </dd>
+        <dt>Scope</dt>
+        <dd>
+          {% if scope %}
+            <span class="copyable-inline" data-copy-container>
+              <span class="token" data-copy-value>{{ scope }}</span>
+              <button class="copy-button" type="button" data-copy-button
+                aria-label="Copy scope" title="Copy scope">
+                <span class="copy-icon" aria-hidden="true"></span>
+              </button>
+            </span>
+          {% else %}
+            <span class="token value-missing">NONE</span>
+          {% endif %}
+        </dd>
+        <dt>Refresh token</dt>
+        <dd>
+          {% if refresh_token %}
+            <span class="copyable-inline" data-copy-container>
+              <span class="token" data-copy-value>{{ refresh_token }}</span>
+              <button class="copy-button" type="button" data-copy-button
+                aria-label="Copy refresh token" title="Copy refresh token">
+                <span class="copy-icon" aria-hidden="true"></span>
+              </button>
+            </span>
+          {% else %}
+            <span class="token value-missing">NONE</span>
+          {% endif %}
+        </dd>
+      </dl>
+      <div class="actions">
+        <a class="button button-primary" href="/authorize">
+          Authorize fruit, veggies, and meats
+        </a>
+        <a class="button button-secondary" href="/produce">
+          Get produce for the current grant
+        </a>
+      </div>
+    </section>
+  </main>
+</body>
+</html>

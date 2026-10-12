@@ -1,0 +1,69 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Favorites API Response</title>
+  <link rel="stylesheet" href="/assets/common.css">
+  <script src="/assets/common.js" defer></script>
+</head>
+<body class="client">
+  <header class="site-header">
+    <div class="header-inner">
+      <a class="brand" href="/">OAuth in Action</a>
+      <span class="service-label">Favorites API Client - localhost:9000</span>
+    </div>
+  </header>
+  <main>
+    <p class="visually-hidden" data-copy-status aria-live="polite"></p>
+    <section class="panel">
+      <h1>{{ data.user }}'s favorites</h1>
+      <p>
+        Owner context came from the validated access-token record, not from
+        client-supplied state or this resource request.
+      </p>
+      <p>
+        Granted scope:
+        {% if scope %}
+          <span class="copyable-inline" data-copy-container>
+            <code data-copy-value>{{ scope }}</code>
+            <button class="copy-button" type="button" data-copy-button
+              aria-label="Copy granted scope" title="Copy granted scope">
+              <span class="copy-icon" aria-hidden="true"></span>
+            </button>
+          </span>
+        {% else %}
+          <span class="token value-missing">NONE</span>
+        {% endif %}
+      </p>
+    </section>
+    {% for category in ("movies", "foods", "music") %}
+      <section class="panel" aria-labelledby="{{ category }}-heading">
+        <h2 id="{{ category }}-heading">{{ category|capitalize }}</h2>
+        {% if data.favorites[category] %}
+          <ul>
+            {% for value in data.favorites[category] %}
+              <li>
+                <span class="copyable-inline" data-copy-container>
+                  <span data-copy-value>{{ value }}</span>
+                  <button class="copy-button" type="button" data-copy-button
+                    aria-label="Copy {{ category }} value {{ value }}"
+                    title="Copy {{ value }}">
+                    <span class="copy-icon" aria-hidden="true"></span>
+                  </button>
+                </span>
+              </li>
+            {% endfor %}
+          </ul>
+        {% else %}
+          <p class="muted">No {{ category }} were returned.</p>
+        {% endif %}
+      </section>
+    {% endfor %}
+    <div class="actions">
+      <a class="button button-primary" href="/favorites">Get favorites again</a>
+      <a class="button button-secondary" href="/">Back to client tokens</a>
+    </div>
+  </main>
+</body>
+</html>

@@ -1,0 +1,101 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Authorization Server</title>
+  <link rel="stylesheet" href="/assets/common.css">
+  <script src="/assets/common.js" defer></script>
+</head>
+<body class="authorization">
+  <header class="site-header">
+    <div class="header-inner">
+      <a class="brand" href="/">OAuth in Action</a>
+      <span class="service-label">Authorization Server - localhost:9001</span>
+    </div>
+  </header>
+  <main>
+    <p class="visually-hidden" data-copy-status aria-live="polite"></p>
+    <section class="panel">
+      <h1>Authorization Server</h1>
+      <p class="muted">
+        This teaching server registers the following OAuth client.
+      </p>
+      {% for client in clients %}
+        <h2>Registered client</h2>
+        <dl>
+          <dt>Client ID</dt>
+          <dd>
+            <span class="copyable-inline" data-copy-container>
+              <code data-copy-value>{{ client.client_id }}</code>
+              <button class="copy-button" type="button" data-copy-button
+                aria-label="Copy client ID" title="Copy client ID">
+                <span class="copy-icon" aria-hidden="true"></span>
+              </button>
+            </span>
+          </dd>
+          <dt>Client secret</dt>
+          <dd>
+            <span class="copyable-inline" data-copy-container>
+              <code data-copy-value>{{ client.client_secret }}</code>
+              <button class="copy-button" type="button" data-copy-button
+                aria-label="Copy client secret" title="Copy client secret">
+                <span class="copy-icon" aria-hidden="true"></span>
+              </button>
+            </span>
+          </dd>
+          <dt>Allowed scope</dt>
+          <dd>
+            <span class="copyable-inline" data-copy-container>
+              <code data-copy-value>{{ client.scope }}</code>
+              <button class="copy-button" type="button" data-copy-button
+                aria-label="Copy allowed scope" title="Copy allowed scope">
+                <span class="copy-icon" aria-hidden="true"></span>
+              </button>
+            </span>
+          </dd>
+          <dt>Redirect URIs</dt>
+          <dd>
+            {% for uri in client.redirect_uris %}
+              <span class="copyable-inline" data-copy-container>
+                <code data-copy-value>{{ uri }}</code>
+                <button class="copy-button" type="button" data-copy-button
+                  aria-label="Copy redirect URI" title="Copy redirect URI">
+                  <span class="copy-icon" aria-hidden="true"></span>
+                </button>
+              </span>
+              {% if not loop.last %}<br>{% endif %}
+            {% endfor %}
+          </dd>
+        </dl>
+      {% endfor %}
+    </section>
+    <section class="panel">
+      <h2>Endpoints</h2>
+      <dl>
+        <dt>Authorization</dt>
+        <dd>
+          <span class="copyable-inline" data-copy-container>
+            <code data-copy-value>{{ auth_server.authorization_endpoint }}</code>
+            <button class="copy-button" type="button" data-copy-button
+              aria-label="Copy authorization endpoint"
+              title="Copy authorization endpoint">
+              <span class="copy-icon" aria-hidden="true"></span>
+            </button>
+          </span>
+        </dd>
+        <dt>Token</dt>
+        <dd>
+          <span class="copyable-inline" data-copy-container>
+            <code data-copy-value>{{ auth_server.token_endpoint }}</code>
+            <button class="copy-button" type="button" data-copy-button
+              aria-label="Copy token endpoint" title="Copy token endpoint">
+              <span class="copy-icon" aria-hidden="true"></span>
+            </button>
+          </span>
+        </dd>
+      </dl>
+    </section>
+  </main>
+</body>
+</html>
