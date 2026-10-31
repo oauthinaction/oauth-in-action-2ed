@@ -196,28 +196,11 @@ def callback() -> str | tuple[str, int]:
         return client_error(f"Unable to fetch token pair: {error}")
 
     token_body = response_json(token_response)
-    returned_access_token = token_body.get("access_token") if token_body else None
-    returned_token_type = token_body.get("token_type") if token_body else None
-    returned_refresh_token = token_body.get("refresh_token") if token_body else None
-    returned_scope = token_body.get("scope") if token_body else None
-    token_pair_is_valid = (
-        isinstance(returned_access_token, str)
-        and bool(returned_access_token)
-        and isinstance(returned_token_type, str)
-        and returned_token_type.lower() == "bearer"
-        and isinstance(returned_refresh_token, str)
-        and bool(returned_refresh_token)
-        and isinstance(returned_scope, str)
-    )
-    if not token_pair_is_valid:
-        access_token = None
-        refresh_token = None
-        scope = None
-        return client_error("Authorization server returned an invalid token response")
-
-    access_token = returned_access_token
-    refresh_token = returned_refresh_token
-    scope = returned_scope
+    access_token = token_body.get("access_token") if token_body else None
+    refresh_token = token_body.get("refresh_token") if token_body else None
+    scope = token_body.get("scope") if token_body else None
+    token_type = token_body.get("token_type") if token_body else None
+    
     return client_index()
 
 
