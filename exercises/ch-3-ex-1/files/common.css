@@ -237,19 +237,6 @@ ul.clean {
   list-style: none;
 }
 
-.scope-option {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: .6rem;
-  margin: .55rem 0;
-}
-
-.scope-option input {
-  width: 1.15rem;
-  height: 1.15rem;
-}
-
 .actions {
   display: flex;
   flex-wrap: wrap;

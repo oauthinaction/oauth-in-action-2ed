@@ -20,7 +20,7 @@ completed work in place and never loads `completed/client.py`; that directory is
 key.
 
 An initial exercise implementation is expected to report three milestone failures: constructing
-the authorization redirect, validating state and exchanging the authorization code, and sending
+the authorization redirect, exchanging the authorization code with the PKCE verifier, and sending
 the access token as a Bearer credential. Secondary error-path cases blocked by an unimplemented
 HTTP 501 response are skipped. As each milestone is implemented in the root `client.py`, the goal
 is for every test to pass.

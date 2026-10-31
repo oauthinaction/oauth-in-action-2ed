@@ -141,18 +141,6 @@ ul.clean {
   list-style: none;
 }
 
-.scope-option {
-  display: flex;
-  align-items: center;
-  gap: .6rem;
-  margin: .55rem 0;
-}
-
-.scope-option input {
-  width: 1.15rem;
-  height: 1.15rem;
-}
-
 .actions {
   display: flex;
   flex-wrap: wrap;
@@ -331,8 +319,4 @@ pre {
 .value-missing {
   color: #b42318;
   font-weight: 700;
-}
-
-.scope-option {
-  flex-wrap: wrap;
 }

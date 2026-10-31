@@ -23,8 +23,9 @@ def load_module(name, path):
 STORE = load_module("ch3_ex1_oauth_store", EXERCISE_DIR / "oauth_store.py")
 sys.modules["oauth_store"] = STORE
 
-# authorizationServer initializes its store when imported, just like the original
-# Node.js module. Point that startup side effect at a disposable database first.
+# authorizationServer initializes its store when imported, just like the
+# original Node.js module. Point that startup side effect at a disposable
+# database first.
 IMPORT_STORE_DIRECTORY = tempfile.TemporaryDirectory(prefix="ch3-ex1-import-")
 STORE.DB_PATH = Path(IMPORT_STORE_DIRECTORY.name) / "oauth.sqlite3"
 
@@ -38,7 +39,11 @@ PROTECTED_RESOURCE = load_module(
 )
 CLIENT = load_module("ch3_ex1_client", EXERCISE_DIR / "client.py")
 
-for flask_app in (CLIENT.app, AUTHORIZATION_SERVER.app, PROTECTED_RESOURCE.app):
+for flask_app in (
+    CLIENT.app,
+    AUTHORIZATION_SERVER.app,
+    PROTECTED_RESOURCE.app,
+):
     flask_app.config["TESTING"] = True
 
 
@@ -79,7 +84,7 @@ def resource_http():
 
 @pytest.fixture(autouse=True)
 def isolated_runtime(tmp_path, monkeypatch):
-    for name in ("state", "code_verifier", "access_token", "scope"):
+    for name in ("code_verifier", "access_token"):
         setattr(CLIENT, name, None)
     AUTHORIZATION_SERVER.approval_requests.clear()
     AUTHORIZATION_SERVER.authorization_codes.clear()
@@ -88,13 +93,14 @@ def isolated_runtime(tmp_path, monkeypatch):
     STORE.reset_schema()
     guarded_post = Mock(
         side_effect=AssertionError(
-            "Unexpected real requests.post attempt; configure the Requests mock seam"
+            "Unexpected real requests.post attempt; "
+            "configure the Requests mock seam"
         )
     )
     monkeypatch.setattr(CLIENT.requests, "post", guarded_post)
     yield guarded_post
 
-    for name in ("state", "code_verifier", "access_token", "scope"):
+    for name in ("code_verifier", "access_token"):
         setattr(CLIENT, name, None)
     AUTHORIZATION_SERVER.approval_requests.clear()
     AUTHORIZATION_SERVER.authorization_codes.clear()

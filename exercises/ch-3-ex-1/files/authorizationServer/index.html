@@ -44,16 +44,6 @@
               </button>
             </span>
           </dd>
-          <dt>Allowed scope</dt>
-          <dd>
-            <span class="copyable-inline" data-copy-container>
-              <code data-copy-value>{{ client.scope }}</code>
-              <button class="copy-button" type="button" data-copy-button
-                aria-label="Copy allowed scope" title="Copy allowed scope">
-                <span class="copy-icon" aria-hidden="true"></span>
-              </button>
-            </span>
-          </dd>
           <dt>Redirect URIs</dt>
           <dd>
             {% for uri in client.redirect_uris %}

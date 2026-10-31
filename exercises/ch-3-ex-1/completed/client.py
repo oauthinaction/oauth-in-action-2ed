@@ -2,7 +2,6 @@
 
 import base64
 import hashlib
-import hmac
 from pathlib import Path
 import secrets
 from typing import Any
@@ -33,17 +32,15 @@ CLIENT = {
 PROTECTED_RESOURCE = "http://localhost:9002/resource"
 REQUEST_TIMEOUT = 5
 
-# Deliberate single-user exercise shortcut: all browser users share this state.
-state: str | None = None
+# Deliberate single-user shortcut: all browser users share these values.
 code_verifier: str | None = None
 access_token: str | None = None
-scope: str | None = None
 
 
 def build_url(
     base: str, parameters: dict[str, str], fragment: str | None = None
 ) -> str:
-    """Add options while preserving query parameters already present in a URL."""
+    """Add options while preserving query parameters already in a URL."""
     parts = urlsplit(base)
     query = dict(parse_qsl(parts.query, keep_blank_values=True))
     query.update(parameters)
@@ -67,13 +64,6 @@ def encode_client_credentials(identifier: str, secret: str) -> str:
     credential_bytes = credential_pair.encode("utf-8")
     encoded_credentials = base64.b64encode(credential_bytes)
     return encoded_credentials.decode("ascii")
-
-
-def states_match(expected: str, received: str) -> bool:
-    """Compare state as bytes so arbitrary Unicode input fails safely."""
-    expected_state_bytes = expected.encode("utf-8")
-    received_state_bytes = received.encode("utf-8")
-    return hmac.compare_digest(expected_state_bytes, received_state_bytes)
 
 
 def client_error(message: str, status: int = 200) -> tuple[str, int]:
@@ -104,21 +94,19 @@ def generate_code_challenge(verifier: str) -> str:
 
 @app.get("/")
 def index() -> str:
-    return render_template("index.html", access_token=access_token, scope=scope)
+    return render_template("index.html", access_token=access_token)
 
 
 @app.get("/authorize")
 def authorize() -> Response:
-    global access_token, code_verifier, state
+    global access_token, code_verifier
     access_token = None
-    state = secrets.token_urlsafe(24)
     code_verifier = generate_code_verifier()
     code_challenge = generate_code_challenge(code_verifier)
     authorization_params = {
         "response_type": "code",
         "client_id": CLIENT["client_id"],
         "redirect_uri": CLIENT["redirect_uris"][0],
-        "state": state,
         "code_challenge": code_challenge,
         "code_challenge_method": "S256",
     }
@@ -130,13 +118,8 @@ def authorize() -> Response:
 
 @app.get("/callback")
 def callback() -> str | tuple[str, int]:
-    global access_token, code_verifier, scope, state
-    returned_state = request.args.get("state")
-    if state is None or returned_state is None or not states_match(state, returned_state):
-        return client_error("State value did not match")
-
+    global access_token, code_verifier
     current_code_verifier = code_verifier
-    state = None
     code_verifier = None
 
     authorization_error = request.args.get("error")
@@ -181,10 +164,14 @@ def callback() -> str | tuple[str, int]:
         return client_error(f"Unable to fetch access token: {error}")
 
     token_body = response_json(token_response)
-    access_token = token_body.get("access_token") if token_body else None
-    scope = token_body.get("scope") if token_body else None
-    
-    return render_template("index.html", access_token=access_token, scope=scope)
+    returned_access_token = (
+        token_body.get("access_token") if token_body else None
+    )
+    if not isinstance(returned_access_token, str):
+        return client_error("Authorization server returned invalid JSON")
+
+    access_token = returned_access_token
+    return render_template("index.html", access_token=access_token)
 
 
 @app.get("/fetch_resource")

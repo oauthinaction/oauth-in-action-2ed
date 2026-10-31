@@ -26,11 +26,13 @@ key.
 
 An initial exercise implementation is expected to report two milestone failures: making
 `refresh_access_token()` exchange the refresh token, require and store both rotated token values,
-update scope, and return a success boolean; and making `fetch_resource()` own error rendering plus
-one explicit protected-resource retry in the same request after a successful refresh. The old
+and return a success boolean (`test_refresh_posts_exact_contract_and_rotates_tokens`); and making
+`fetch_resource()` own error rendering plus one explicit protected-resource retry in the same
+request after a successful refresh (`test_first_401_refreshes_then_retries_resource_once`). The old
 refresh token is single-use: the authorization server atomically replaces it, and only the rotated
 refresh token can be used again. Secondary refresh error cases blocked while the root refresh stub
-makes no Requests call are skipped. As each milestone is implemented in the root `client.py`, the
+makes no Requests call are skipped. With the starter `client.py` the suite reports
+`2 failed, 39 passed, 5 skipped`. As each milestone is implemented in the root `client.py`, the
 goal is for every test to pass.
 
 No live services are required. Flask test clients call all three applications in process, outbound

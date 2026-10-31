@@ -19,7 +19,10 @@ RESOURCE = {
     "name": "Protected Resource",
     "description": "This data has been protected by OAuth 2.0",
 }
-BEARER_PATTERN = re.compile(r"^Bearer ([A-Za-z0-9\-._~+/]+={0,2})$", re.IGNORECASE)
+BEARER_PATTERN = re.compile(
+    r"^Bearer ([A-Za-z0-9\-._~+/]+={0,2})$",
+    re.IGNORECASE,
+)
 
 
 def incoming_access_token() -> str | None:

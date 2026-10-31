@@ -1,4 +1,4 @@
-"""Chapter 3 authorization server with authorization-code and refresh grants."""
+"""Chapter 3 authorization server: authorization-code and refresh grants."""
 
 from __future__ import annotations
 
@@ -9,7 +9,13 @@ import hmac
 from pathlib import Path
 import secrets
 from typing import Any, TypedDict
-from urllib.parse import parse_qsl, unquote_plus, urlencode, urlsplit, urlunsplit
+from urllib.parse import (
+    parse_qsl,
+    unquote_plus,
+    urlencode,
+    urlsplit,
+    urlunsplit,
+)
 
 from flask import Flask, Response, jsonify, redirect, render_template, request
 
@@ -38,7 +44,6 @@ CLIENTS = [
         "client_id": "oauth-client-1",
         "client_secret": "oauth-client-secret-1",
         "redirect_uris": ["http://localhost:9000/callback"],
-        "scope": "foo bar",
     }
 ]
 
@@ -59,25 +64,31 @@ PKCE_CHALLENGE_CHARACTERS = frozenset(
 class AuthorizationCode(TypedDict):
     client_id: str
     redirect_uri: str
-    scope: list[str]
     code_challenge: str
     code_challenge_method: str
 
 
-# Deliberately in memory: Chapter 3 focuses on the protocol, not durable grants.
+# Deliberately in memory: Chapter 3 focuses on the protocol, not durable
+# grants.
 approval_requests: dict[str, dict[str, str]] = {}
 authorization_codes: dict[str, AuthorizationCode] = {}
 
 
 def build_url(base: str, parameters: dict[str, str | None]) -> str:
-    """Add query parameters without discarding parameters already in the URL."""
+    """Add query parameters without discarding those already in the URL."""
     parts = urlsplit(base)
     query = dict(parse_qsl(parts.query, keep_blank_values=True))
     query.update(
         {key: value for key, value in parameters.items() if value is not None}
     )
     return urlunsplit(
-        (parts.scheme, parts.netloc, parts.path, urlencode(query), parts.fragment)
+        (
+            parts.scheme,
+            parts.netloc,
+            parts.path,
+            urlencode(query),
+            parts.fragment,
+        )
     )
 
 
@@ -109,7 +120,9 @@ def request_data() -> dict[str, Any]:
     return request.form.to_dict()
 
 
-def basic_credentials(header: str | None) -> tuple[tuple[str, str] | None, bool]:
+def basic_credentials(
+    header: str | None,
+) -> tuple[tuple[str, str] | None, bool]:
     """Decode OAuth Basic credentials, including OAuth percent decoding."""
     if header is None:
         return None, False
@@ -132,7 +145,10 @@ def generate_code_challenge(code_verifier: str) -> str | None:
         return None
     if not 43 <= len(code_verifier) <= 128:
         return None
-    if any(character not in PKCE_VERIFIER_CHARACTERS for character in code_verifier):
+    if any(
+        character not in PKCE_VERIFIER_CHARACTERS
+        for character in code_verifier
+    ):
         return None
     try:
         ascii_verifier = code_verifier.encode("ascii")
@@ -191,13 +207,17 @@ def validate_code_verifier(
     return hmac.compare_digest(generated_bytes, expected_bytes)
 
 
-def redirect_error(callback: str, error: str, state: str | None) -> Response:
-    return redirect(build_url(callback, {"error": error, "state": state}))
+def redirect_error(callback: str, error: str) -> Response:
+    return redirect(build_url(callback, {"error": error}))
 
 
 @app.get("/")
 def index() -> str:
-    return render_template("index.html", clients=CLIENTS, auth_server=AUTH_SERVER)
+    return render_template(
+        "index.html",
+        clients=CLIENTS,
+        auth_server=AUTH_SERVER,
+    )
 
 
 @app.get("/authorize")
@@ -210,29 +230,14 @@ def authorize() -> Response | str:
     if redirect_uri not in client["redirect_uris"]:
         return render_template("error.html", error="Invalid redirect URI"), 400
 
-    requested_scope = request.args.get("scope", "").split()
-    allowed_scope = set(client["scope"].split())
-    if not set(requested_scope).issubset(allowed_scope):
-        return redirect_error(
-            redirect_uri,
-            "invalid_scope",
-            request.args.get("state"),
-        )
-
     code_challenge = request.args.get("code_challenge")
     challenge_method = request.args.get("code_challenge_method")
     if not validate_code_challenge(code_challenge, challenge_method):
-        return redirect_error(
-            redirect_uri,
-            "invalid_request",
-            request.args.get("state"),
-        )
+        return redirect_error(redirect_uri, "invalid_request")
 
     request_id = secrets.token_urlsafe(18)
     approval_requests[request_id] = request.args.to_dict()
-    return render_template(
-        "approve.html", client=client, reqid=request_id, scope=requested_scope
-    )
+    return render_template("approve.html", client=client, reqid=request_id)
 
 
 @app.post("/approve")
@@ -244,32 +249,19 @@ def approve() -> Response | str:
         ), 400
 
     callback = saved_request["redirect_uri"]
-    state = saved_request.get("state")
     if "approve" not in request.form:
-        return redirect_error(callback, "access_denied", state)
+        return redirect_error(callback, "access_denied")
     if saved_request.get("response_type") != "code":
-        return redirect_error(callback, "unsupported_response_type", state)
-
-    granted_scope = [
-        key.removeprefix("scope_")
-        for key in request.form
-        if key.startswith("scope_")
-    ]
-    client = get_client(saved_request.get("client_id"))
-    requested_scope = set(saved_request.get("scope", "").split())
-    allowed_scope = set(client["scope"].split()) if client else set()
-    if not set(granted_scope).issubset(requested_scope & allowed_scope):
-        return redirect_error(callback, "invalid_scope", state)
+        return redirect_error(callback, "unsupported_response_type")
 
     code = secrets.token_urlsafe(24)
     authorization_codes[code] = {
         "client_id": saved_request["client_id"],
         "redirect_uri": callback,
-        "scope": granted_scope,
         "code_challenge": saved_request["code_challenge"],
         "code_challenge_method": saved_request["code_challenge_method"],
     }
-    return redirect(build_url(callback, {"code": code, "state": state}))
+    return redirect(build_url(callback, {"code": code}))
 
 
 def authenticate_client(
@@ -333,15 +325,13 @@ def token() -> tuple[Response, int] | Response:
 
         del authorization_codes[code_value]
         access_token = secrets.token_urlsafe(32)
-        scope = " ".join(code["scope"])
         try:
-            insert_access_token(access_token, client["client_id"], scope)
+            insert_access_token(access_token, client["client_id"])
         except DatabaseError:
             return temporarily_unavailable()
         return jsonify(
             access_token=access_token,
             token_type="Bearer",
-            scope=scope,
         )
 
     if body.get("grant_type") == "refresh_token":
@@ -372,10 +362,11 @@ def token() -> tuple[Response, int] | Response:
     return oauth_error("unsupported_grant_type")
 
 
-# Match the original authorization-server startup lifecycle: loading the app clears
-# its exercise-local store and registers the documented refresh-token fixture.
+# Match the original authorization-server startup lifecycle: loading the app
+# clears its exercise-local store and registers the documented refresh-token
+# fixture.
 reset_schema()
-insert_refresh_token(PRECONFIGURED_REFRESH_TOKEN, "oauth-client-1", "foo bar")
+insert_refresh_token(PRECONFIGURED_REFRESH_TOKEN, "oauth-client-1")
 
 
 if __name__ == "__main__":
