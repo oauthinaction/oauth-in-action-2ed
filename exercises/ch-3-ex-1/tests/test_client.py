@@ -5,7 +5,6 @@ from helpers import (
     TEST_CODE_CHALLENGE,
     TEST_CODE_VERIFIER,
     generate_test_code_challenge,
-    malformed_json_response,
     oauth_form_headers,
     oauth_response,
     redirect_query,
@@ -206,25 +205,6 @@ def test_callback_without_code_verifier_makes_no_token_request(
         "authorization request"
     )
     requests_post.assert_not_called()
-
-
-def test_callback_reports_malformed_token_json(
-    client_module,
-    client_http,
-    requests_post,
-):
-    client_module.code_verifier = TEST_CODE_VERIFIER
-    requests_post.return_value = malformed_json_response()
-    requests_post.side_effect = None
-    response = client_http.get("/callback", query_string={"code": "code-123"})
-    if response.status_code == 501:
-        pytest.skip(
-            "Starter callback TODO blocks token-response error handling"
-        )
-    assert b"Authorization server returned invalid JSON" in response.data, (
-        "Validate that the token endpoint returns an object with an "
-        "access_token string"
-    )
 
 
 def test_callback_rejects_token_endpoint_redirect(

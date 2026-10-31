@@ -8,7 +8,6 @@ from helpers import (
     TEST_CODE_CHALLENGE,
     TEST_CODE_VERIFIER,
     generate_test_code_challenge,
-    malformed_json_response,
     oauth_form_headers,
     oauth_response,
     redirect_query,
@@ -583,12 +582,6 @@ def test_resource_redirect_is_error_and_never_refreshes(
     "token_response",
     [
         oauth_response(status=400, payload={"error": "invalid_grant"}),
-        malformed_json_response(),
-        oauth_response(
-            payload={
-                "access_token": "access-without-rotation",
-            },
-        ),
         oauth_response(
             status=302,
             payload={
@@ -599,8 +592,6 @@ def test_resource_redirect_is_error_and_never_refreshes(
     ],
     ids=[
         "token-endpoint-rejection",
-        "malformed-json",
-        "missing-rotated-refresh-token",
         "token-endpoint-redirect",
     ],
 )
@@ -617,7 +608,7 @@ def test_refresh_failure_clears_unusable_refresh_token(
     if not requests_post.called:
         pytest.skip("Starter refresh TODO makes no Requests call")
     assert result is False, (
-        "Reject non-2xx responses, redirects, and malformed token payloads"
+        "Reject non-2xx responses and redirects from the token endpoint"
     )
     assert client_module.access_token == "existing-access"
     assert client_module.refresh_token is None

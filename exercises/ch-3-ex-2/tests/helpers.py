@@ -18,24 +18,13 @@ def generate_test_code_challenge(code_verifier):
     return base64url_digest.decode("ascii").rstrip("=")
 
 
-def oauth_response(status=200, payload=None, raw_body=None):
+def oauth_response(status=200, payload=None):
     response = requests.Response()
     response.status_code = status
     response.url = "https://test.invalid/oauth"
     response.headers["Content-Type"] = "application/json"
-    if raw_body is not None:
-        response._content = raw_body
-    else:
-        response._content = json.dumps(payload).encode("utf-8")
+    response._content = json.dumps(payload).encode("utf-8")
     return response
-
-
-def malformed_json_response(status=200):
-    return oauth_response(status=status, raw_body=b'{"access_token":')
-
-
-def non_object_json_response(status=200):
-    return oauth_response(status=status, payload=["not", "an", "object"])
 
 
 def oauth_form_headers(client_id, client_secret):

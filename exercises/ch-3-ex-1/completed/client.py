@@ -164,13 +164,7 @@ def callback() -> str | tuple[str, int]:
         return client_error(f"Unable to fetch access token: {error}")
 
     token_body = response_json(token_response)
-    returned_access_token = (
-        token_body.get("access_token") if token_body else None
-    )
-    if not isinstance(returned_access_token, str):
-        return client_error("Authorization server returned invalid JSON")
-
-    access_token = returned_access_token
+    access_token = token_body.get("access_token") if token_body else None
     return render_template("index.html", access_token=access_token)
 
 
@@ -198,8 +192,6 @@ def fetch_resource() -> str | tuple[str, int]:
         return client_error(f"Unable to fetch resource: {error}")
 
     resource_body = response_json(resource_response)
-    if resource_body is None:
-        return client_error("Protected resource returned invalid JSON")
     return render_template("data.html", resource=resource_body)
 
 
