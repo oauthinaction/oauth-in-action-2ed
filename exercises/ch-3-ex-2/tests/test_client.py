@@ -1,3 +1,4 @@
+from datetime import datetime
 from unittest.mock import Mock
 
 import pytest
@@ -270,7 +271,21 @@ def test_successful_resource_request_uses_bearer_without_refresh(
     refresh_helper.assert_not_called()
 
 
-def test_first_401_refreshes_then_retries_resource_once(
+UNAUTHORIZED_NOTICE = b"The protected resource returned 401 Unauthorized."
+
+
+def expected_local_time(epoch):
+    local_time = datetime.fromtimestamp(epoch).astimezone()
+    return local_time.strftime("%Y-%m-%d %H:%M:%S %Z")
+
+
+def refresh_button_markup(page):
+    start = page.index('<form class="inline-form" action="/refresh"')
+    end = page.index("</form>", start)
+    return page[start:end]
+
+
+def test_401_is_reported_and_never_refreshes_automatically(
     client_module,
     client_http,
     requests_post,
@@ -278,15 +293,42 @@ def test_first_401_refreshes_then_retries_resource_once(
 ):
     client_module.access_token = "expired-access"
     client_module.refresh_token = "refresh-123"
-    requests_post.side_effect = [
-        oauth_response(
-            status=401,
-            payload={"error": "invalid_token"},
-        ),
-        oauth_response(
-            payload={"name": "Protected Resource"},
-        ),
-    ]
+    refresh_helper = Mock()
+    monkeypatch.setattr(client_module, "refresh_access_token", refresh_helper)
+    requests_post.return_value = oauth_response(
+        status=401,
+        payload={"error": "invalid_token"},
+    )
+    requests_post.side_effect = None
+
+    response = client_http.get("/fetch_resource")
+    page = response.get_data(as_text=True)
+
+    assert response.status_code == 200
+    assert UNAUTHORIZED_NOTICE in response.data, (
+        "Tell the user that the protected resource returned a 401"
+    )
+    assert "<dt>Access token</dt>" in page, (
+        "Report the 401 on the client page so the Refresh token button "
+        "is available"
+    )
+    refresh_helper.assert_not_called()
+    requests_post.assert_called_once()
+    assert client_module.access_token is None
+    assert client_module.refresh_token == "refresh-123"
+    assert "Refresh token" in refresh_button_markup(page), (
+        "Show the Refresh token button with the 401 message"
+    )
+
+
+def test_refresh_button_runs_refresh_and_records_epoch(
+    client_module,
+    client_http,
+    requests_post,
+    monkeypatch,
+):
+    refreshed_at = 1_700_000_000
+    monkeypatch.setattr(client_module.time, "time", lambda: refreshed_at)
 
     def refresh_once():
         client_module.access_token = "replacement-access"
@@ -296,24 +338,164 @@ def test_first_401_refreshes_then_retries_resource_once(
     refresh_helper = Mock(side_effect=refresh_once)
     monkeypatch.setattr(client_module, "refresh_access_token", refresh_helper)
 
-    response = client_http.get("/fetch_resource")
+    response = client_http.post("/refresh")
+
+    assert response.status_code == 303
+    assert response.headers["Location"] == "/"
+    refresh_helper.assert_called_once_with()
+    # Refreshing never fetches the protected resource; the user clicks
+    # Fetch protected resource again.
+    requests_post.assert_not_called()
+    assert client_module.last_refresh_epoch == refreshed_at, (
+        "Store the epoch seconds of the last successful refresh"
+    )
+
+    home = client_http.get("/")
+    assert expected_local_time(refreshed_at).encode() in home.data, (
+        "Show the last refresh time in this machine's local timezone"
+    )
+    assert b"replacement-access" in home.data
+    assert b"rotated-refresh" in home.data
+
+
+def test_refresh_requires_post(client_http):
+    response = client_http.get("/refresh")
+
+    assert response.status_code == 405
+
+
+def test_failed_refresh_reports_error_and_keeps_last_epoch(
+    client_module,
+    client_http,
+    requests_post,
+    monkeypatch,
+):
+    client_module.last_refresh_epoch = 1_000
+    monkeypatch.setattr(client_module.time, "time", lambda: 1_100)
+    refresh_helper = Mock(return_value=False)
+    monkeypatch.setattr(client_module, "refresh_access_token", refresh_helper)
+
+    response = client_http.post("/refresh")
+
+    assert response.status_code == 200
+    assert b"Unable to refresh token." in response.data
+    refresh_helper.assert_called_once_with()
+    assert client_module.last_refresh_epoch == 1_000
+    requests_post.assert_not_called()
+
+
+def test_refresh_is_blocked_for_20_seconds_after_last_refresh(
+    client_module,
+    client_http,
+    monkeypatch,
+):
+    client_module.last_refresh_epoch = 1_000
+    refresh_helper = Mock(return_value=True)
+    monkeypatch.setattr(client_module, "refresh_access_token", refresh_helper)
+
+    monkeypatch.setattr(client_module.time, "time", lambda: 1_005)
+    blocked = client_http.post("/refresh")
+    blocked_page = blocked.get_data(as_text=True)
+
+    assert blocked.status_code == 200
+    assert (
+        "You need to wait 15 seconds before you can refresh again."
+        in blocked_page
+    ), "Tell the user how long to wait before refreshing again"
+    assert "<dt>Access token</dt>" in blocked_page, (
+        "Show the wait message on the client page, not an error page"
+    )
+    refresh_helper.assert_not_called()
+    assert client_module.last_refresh_epoch == 1_000
+
+    monkeypatch.setattr(client_module.time, "time", lambda: 1_019)
+    last_second = client_http.post("/refresh")
 
     assert (
-        response.status_code == 200
-        and b"Protected Resource" in response.data
-    ), (
-        "After the first 401, refresh once and return the retried "
-        "resource data"
+        b"You need to wait 1 seconds before you can refresh again."
+        in last_second.data
     )
+    refresh_helper.assert_not_called()
+
+    monkeypatch.setattr(client_module.time, "time", lambda: 1_020)
+    allowed = client_http.post("/refresh")
+
+    assert allowed.status_code == 303
     refresh_helper.assert_called_once_with()
-    assert requests_post.call_count == 2
-    first_request, retry_request = requests_post.call_args_list
-    assert first_request.kwargs["headers"]["Authorization"] == (
-        "Bearer expired-access"
+    assert client_module.last_refresh_epoch == 1_020
+
+
+def test_refresh_without_refresh_token_is_rejected(
+    client_module,
+    client_http,
+    monkeypatch,
+):
+    client_module.refresh_token = None
+    refresh_helper = Mock()
+    monkeypatch.setattr(client_module, "refresh_access_token", refresh_helper)
+
+    response = client_http.post("/refresh")
+
+    assert b"No refresh token available." in response.data
+    refresh_helper.assert_not_called()
+
+
+@pytest.mark.parametrize(
+    ("refresh_token", "last_refresh_epoch"),
+    [
+        ("refresh-123", None),
+        ("refresh-123", 1_000),
+        (None, None),
+    ],
+    ids=["no-refresh-yet", "during-wait", "no-refresh-token"],
+)
+def test_refresh_button_is_always_enabled(
+    client_module,
+    client_http,
+    monkeypatch,
+    refresh_token,
+    last_refresh_epoch,
+):
+    client_module.refresh_token = refresh_token
+    client_module.last_refresh_epoch = last_refresh_epoch
+    monkeypatch.setattr(client_module.time, "time", lambda: 1_005)
+
+    page = client_http.get("/").get_data(as_text=True)
+
+    assert "disabled" not in refresh_button_markup(page), (
+        "Never disable the Refresh token button; explain any wait "
+        "after it is clicked"
     )
-    assert retry_request.kwargs["headers"]["Authorization"] == (
-        "Bearer replacement-access"
+    assert "You need to wait" not in page, (
+        "Show the wait message only after Refresh token is clicked"
     )
+
+
+def test_refresh_button_flow_with_real_helper(
+    client_module,
+    client_http,
+    requests_post,
+    monkeypatch,
+):
+    monkeypatch.setattr(client_module.time, "time", lambda: 2_000)
+    requests_post.return_value = oauth_response(
+        payload={
+            "access_token": "new-access",
+            "refresh_token": "rotated-refresh",
+        }
+    )
+    requests_post.side_effect = None
+
+    response = client_http.post("/refresh")
+    if not requests_post.called:
+        pytest.skip("Starter refresh TODO makes no Requests call")
+
+    assert response.status_code == 303
+    requests_post.assert_called_once()
+    assert requests_post.call_args.args[0] == "http://localhost:9001/token"
+    assert client_module.access_token == "new-access"
+    assert client_module.refresh_token == "rotated-refresh"
+    assert client_module.last_refresh_epoch == 2_000
 
 
 def test_refresh_posts_exact_contract_and_rotates_tokens(
@@ -397,39 +579,6 @@ def test_resource_redirect_is_error_and_never_refreshes(
     refresh_helper.assert_not_called()
 
 
-def test_second_401_is_final_and_never_refreshes_again(
-    client_module,
-    client_http,
-    requests_post,
-    monkeypatch,
-):
-    client_module.access_token = "expired-access"
-    client_module.refresh_token = "refresh-123"
-    requests_post.side_effect = [
-        oauth_response(status=401, payload={"error": "invalid_token"}),
-        oauth_response(status=401, payload={"error": "invalid_token"}),
-    ]
-
-    def refresh_once():
-        client_module.access_token = "replacement-access"
-        client_module.refresh_token = "rotated-refresh"
-        return True
-
-    refresh_helper = Mock(side_effect=refresh_once)
-    monkeypatch.setattr(client_module, "refresh_access_token", refresh_helper)
-
-    response = client_http.get("/fetch_resource")
-    if not refresh_helper.called:
-        pytest.skip("Starter retry TODO does not yet call the refresh helper")
-
-    assert response.status_code == 200
-    assert b"Status 401" in response.data
-    refresh_helper.assert_called_once_with()
-    assert requests_post.call_count == 2
-    assert client_module.access_token is None
-    assert client_module.refresh_token == "rotated-refresh"
-
-
 @pytest.mark.parametrize(
     "token_response",
     [
@@ -491,19 +640,27 @@ def test_home_copy_contract_for_missing_and_present_values(
 ):
     client_module.access_token = None
     client_module.refresh_token = "present-refresh"
+    client_module.last_refresh_epoch = None
     missing = client_http.get("/")
     missing_markup = b'<span class="token value-missing">NONE</span>'
 
     assert missing.status_code == 200
-    assert missing.data.count(missing_markup) == 1
+    assert missing.data.count(missing_markup) == 2, (
+        "Show NONE for the missing access token and last refresh time"
+    )
     assert missing.data.count(b"data-copy-value") == 1
     assert missing.data.count(b"data-copy-button") == 1
 
     client_module.access_token = "present-access"
     client_module.refresh_token = "present-refresh"
+    client_module.last_refresh_epoch = 1_000
     present = client_http.get("/")
 
-    for value in (b"present-access", b"present-refresh"):
+    for value in (
+        b"present-access",
+        b"present-refresh",
+        expected_local_time(1_000).encode(),
+    ):
         assert value in present.data
     assert present.data.count(b"data-copy-value") == 2
     assert present.data.count(b"data-copy-button") == 2
@@ -527,9 +684,15 @@ def test_index_renders_consistent_token_rows(client_http):
     assert "<dt>Access token</dt>" in page
     assert "<dt>Scope</dt>" not in page
     assert "<dt>Refresh token</dt>" in page
-    assert page.count('class="token value-missing">NONE</span>') == 0, (
-        "Both documented fixtures are present, so no token row shows NONE"
+    assert "<dt>Last refresh</dt>" in page
+    assert page.index("<dt>Refresh token</dt>") < page.index(
+        "<dt>Last refresh</dt>"
+    ), "Show the last refresh time under the token values"
+    assert page.count('class="token value-missing">NONE</span>') == 1, (
+        "Both token fixtures are present; only the never-run last refresh "
+        "shows NONE"
     )
+    assert "Refresh token\n" in refresh_button_markup(page)
 
 
 def test_callback_connection_failure_is_rendered_not_500(

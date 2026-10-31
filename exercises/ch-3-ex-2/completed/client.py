@@ -1,9 +1,11 @@
 """Completed refresh-token client for Chapter 3 Exercise 2."""
 
 import base64
+from datetime import datetime
 import hashlib
 from pathlib import Path
 import secrets
+import time
 from typing import Any
 from urllib.parse import parse_qsl, quote_plus, urlencode, urlsplit, urlunsplit
 
@@ -31,6 +33,7 @@ CLIENT = {
 }
 PROTECTED_RESOURCE = "http://localhost:9002/resource"
 REQUEST_TIMEOUT = 5
+REFRESH_COOLDOWN_SECONDS = 20
 
 # Intentional Exercise 2 teaching fixtures: the access token starts invalid
 # while the authorization server recognizes the refresh token.
@@ -41,6 +44,8 @@ INITIAL_REFRESH_TOKEN = "j2r3oj32r23rmasd98uhjrk2o3i"
 code_verifier: str | None = None
 access_token: str | None = INITIAL_ACCESS_TOKEN
 refresh_token: str | None = INITIAL_REFRESH_TOKEN
+# Epoch seconds of the last successful refresh; None until one happens.
+last_refresh_epoch: int | None = None
 
 
 def build_url(
@@ -98,11 +103,31 @@ def generate_code_challenge(verifier: str) -> str:
     return padded_challenge.rstrip("=")
 
 
-def client_index() -> str:
+def format_local_time(epoch: int) -> str:
+    """Show epoch seconds as a date and time in this machine's timezone."""
+    local_time = datetime.fromtimestamp(epoch).astimezone()
+    return local_time.strftime("%Y-%m-%d %H:%M:%S %Z")
+
+
+def seconds_until_refresh_allowed() -> int:
+    """Return how many seconds remain before another refresh is allowed."""
+    if last_refresh_epoch is None:
+        return 0
+    seconds_since_refresh = int(time.time()) - last_refresh_epoch
+    remaining_seconds = REFRESH_COOLDOWN_SECONDS - seconds_since_refresh
+    return max(remaining_seconds, 0)
+
+
+def client_index(notice: str | None = None) -> str:
+    last_refresh_time = None
+    if last_refresh_epoch is not None:
+        last_refresh_time = format_local_time(last_refresh_epoch)
     return render_template(
         "index.html",
         access_token=access_token,
         refresh_token=refresh_token,
+        last_refresh_time=last_refresh_time,
+        notice=notice,
     )
 
 
@@ -219,45 +244,41 @@ def fetch_resource() -> str | tuple[str, int]:
         return render_template("data.html", resource=resource_body)
 
     access_token = None
-    if resource_response.status_code != 401:
-        return client_error(
-            f"Unable to fetch resource. Status {resource_response.status_code}"
+    if resource_response.status_code == 401:
+        # Report the 401; refreshing is the user's next, separate step.
+        return client_index(
+            notice=(
+                "The protected resource returned 401 Unauthorized. "
+                "Refresh the token, then fetch the protected "
+                "resource again."
+            )
         )
+    return client_error(
+        f"Unable to fetch resource. Status {resource_response.status_code}"
+    )
 
+
+@app.post("/refresh")
+def refresh() -> Response | str | tuple[str, int]:
+    global last_refresh_epoch
     if not refresh_token:
-        return client_error("Unable to fetch resource. Status 401")
+        return client_error("No refresh token available.")
+
+    refresh_wait_seconds = seconds_until_refresh_allowed()
+    if refresh_wait_seconds > 0:
+        return client_index(
+            notice=(
+                f"You need to wait {refresh_wait_seconds} seconds "
+                "before you can refresh again."
+            )
+        )
 
     token_refreshed = refresh_access_token()
     if not token_refreshed:
         return client_error("Unable to refresh token.")
 
-    retry_headers = {
-        "Authorization": f"Bearer {access_token}",
-        "Content-Type": "application/x-www-form-urlencoded",
-    }
-    try:
-        retry_response = requests.post(
-            PROTECTED_RESOURCE,
-            headers=retry_headers,
-            timeout=REQUEST_TIMEOUT,
-            allow_redirects=False,
-        )
-    except requests.RequestException as error:
-        return client_error(f"Unable to fetch resource: {error}")
-
-    retry_succeeded = 200 <= retry_response.status_code < 300
-    if not retry_succeeded:
-        if retry_response.status_code == 401:
-            access_token = None
-        return client_error(
-            f"Unable to fetch resource. Status {retry_response.status_code}"
-        )
-
-    retry_response.raise_for_status()
-    resource_body = response_json(retry_response)
-    if resource_body is None:
-        return client_error("Protected resource returned invalid JSON")
-    return render_template("data.html", resource=resource_body)
+    last_refresh_epoch = int(time.time())
+    return redirect("/", code=303)
 
 
 def refresh_access_token() -> bool:

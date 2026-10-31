@@ -87,6 +87,7 @@ def isolated_runtime(tmp_path, monkeypatch):
     CLIENT.code_verifier = None
     CLIENT.access_token = CLIENT.INITIAL_ACCESS_TOKEN
     CLIENT.refresh_token = CLIENT.INITIAL_REFRESH_TOKEN
+    CLIENT.last_refresh_epoch = None
     AUTHORIZATION_SERVER.approval_requests.clear()
     AUTHORIZATION_SERVER.authorization_codes.clear()
 
@@ -108,6 +109,7 @@ def isolated_runtime(tmp_path, monkeypatch):
     CLIENT.code_verifier = None
     CLIENT.access_token = CLIENT.INITIAL_ACCESS_TOKEN
     CLIENT.refresh_token = CLIENT.INITIAL_REFRESH_TOKEN
+    CLIENT.last_refresh_epoch = None
     AUTHORIZATION_SERVER.approval_requests.clear()
     AUTHORIZATION_SERVER.authorization_codes.clear()
 
