@@ -6,7 +6,9 @@ from helpers import CLIENT_ID, FULL_PRODUCE
 def assert_invalid_token(response):
     assert response.status_code == 401
     assert response.get_json() == {"error": "invalid_token"}
-    assert response.headers["WWW-Authenticate"] == 'Bearer realm="protected-resource"'
+    assert response.headers["WWW-Authenticate"] == (
+        'Bearer realm="protected-resource"'
+    )
 
 
 def expected_produce(scope):
@@ -47,7 +49,9 @@ def test_strict_bearer_transport_and_exact_lookup(
     assert lookup.call_count == 1
 
 
-def test_missing_unknown_malformed_and_prefix_tokens_are_401(resource_http, oauth_store):
+def test_missing_unknown_malformed_and_prefix_tokens_are_401(
+    resource_http, oauth_store
+):
     oauth_store.insert_access_token("stored-token", CLIENT_ID, "fruit")
     attempts = (
         {},
@@ -65,7 +69,9 @@ def test_missing_unknown_malformed_and_prefix_tokens_are_401(resource_http, oaut
 
 
 def test_query_string_token_is_rejected(resource_http, oauth_store):
-    oauth_store.insert_access_token("query-token", CLIENT_ID, "fruit veggies meats")
+    oauth_store.insert_access_token(
+        "query-token", CLIENT_ID, "fruit veggies meats"
+    )
     response = resource_http.get(
         "/produce", query_string={"access_token": "query-token"}
     )
@@ -101,7 +107,9 @@ def test_produce_fails_closed_when_validator_returns_no_record_or_error(
     assert_invalid_token(response)
 
 
-def test_full_scope_returns_complete_three_category_document(resource_http, oauth_store):
+def test_full_scope_returns_complete_three_category_document(
+    resource_http, oauth_store
+):
     oauth_store.insert_access_token(
         "full-scope-token", CLIENT_ID, "fruit veggies meats"
     )
@@ -135,7 +143,9 @@ def test_scope_filtering_milestone_exactly_matches_each_valid_token_grant(
         response = resource_http.get(
             "/produce", headers={"Authorization": f"Bearer {token}"}
         )
-        assert response.status_code != 403, "A valid token is authorized even with no scopes"
+        assert response.status_code != 403, (
+            "A valid token is authorized even with no scopes"
+        )
         assert response.status_code == 200
         body = response.get_json()
         assert set(body) == {"fruit", "veggies", "meats"}
@@ -144,7 +154,8 @@ def test_scope_filtering_milestone_exactly_matches_each_valid_token_grant(
             mismatches.append(f"{case_name}: expected {expected}, got {body}")
 
     assert not mismatches, (
-        "Filtering milestone: populate only categories whose exact scope name is granted; "
-        "valid tokens always return all three keys with ungranted lists empty.\n"
+        "Filtering milestone: populate only categories whose exact scope "
+        "name is granted; valid tokens always return all three keys with "
+        "ungranted lists empty.\n"
         + "\n".join(mismatches)
     )

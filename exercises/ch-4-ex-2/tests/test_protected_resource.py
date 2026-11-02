@@ -85,8 +85,9 @@ def test_words_routes_apply_inherited_access_validation(resource_http):
     }
     assert actual_statuses == {"GET": 401, "POST": 401, "DELETE": 401}, (
         "Inherited Exercise 1 contract: every /words route must call "
-        "validated_access_record(), return authentication_error when present, "
-        f"and continue only with a non-None access_record; got {actual_statuses}"
+        "validated_access_record(), return authentication_error when "
+        "present, and continue only with a non-None access_record; "
+        f"got {actual_statuses}"
     )
     for response in responses.values():
         assert response.get_json() == {"error": "invalid_token"}
@@ -122,7 +123,10 @@ def test_words_routes_fail_closed_when_validator_returns_no_record_or_error(
     ("method", "kwargs"),
     [
         ("get", {"headers": {"authorization": "bEaReR transport-token"}}),
-        ("post", {"data": {"access_token": "transport-token", "word": "form"}}),
+        (
+            "post",
+            {"data": {"access_token": "transport-token", "word": "form"}},
+        ),
     ],
     ids=["bearer-header", "form-body"],
 )
@@ -161,7 +165,9 @@ def test_malformed_authorization_header_never_falls_back_to_query(
     )
     assert response.status_code == 401
     assert response.get_json() == {"error": "invalid_token"}
-    assert response.headers["WWW-Authenticate"] == 'Bearer realm="protected-resource"'
+    assert response.headers["WWW-Authenticate"] == (
+        'Bearer realm="protected-resource"'
+    )
 
 
 @pytest.mark.parametrize(
@@ -177,7 +183,9 @@ def test_missing_or_malformed_bearer_is_exact_401(
     assert response.status_code == 401
     assert response.content_type == "application/json"
     assert response.get_json() == {"error": "invalid_token"}
-    assert response.headers["WWW-Authenticate"] == 'Bearer realm="protected-resource"'
+    assert response.headers["WWW-Authenticate"] == (
+        'Bearer realm="protected-resource"'
+    )
 
 
 def test_unknown_token_is_exact_401(oauth_store, resource_http):
@@ -185,7 +193,9 @@ def test_unknown_token_is_exact_401(oauth_store, resource_http):
     response = resource_http.get("/words", headers=bearer("unknown"))
     assert response.status_code == 401
     assert response.get_json() == {"error": "invalid_token"}
-    assert response.headers["WWW-Authenticate"] == 'Bearer realm="protected-resource"'
+    assert response.headers["WWW-Authenticate"] == (
+        'Bearer realm="protected-resource"'
+    )
 
 
 def test_lookup_database_failure_is_exact_503(
@@ -193,7 +203,9 @@ def test_lookup_database_failure_is_exact_503(
     resource_http,
     monkeypatch,
 ):
-    lookup = Mock(side_effect=protected_resource.DatabaseError("database down"))
+    lookup = Mock(
+        side_effect=protected_resource.DatabaseError("database down")
+    )
     monkeypatch.setattr(protected_resource, "find_access_token", lookup)
     response = resource_http.get("/words", headers=bearer("access-1"))
     assert response.status_code == 503
@@ -210,7 +222,9 @@ def test_get_words_requires_read_and_returns_words_with_millisecond_timestamp(
 ):
     issue_access(oauth_store, scope="write read delete")
     protected_resource.SAVED_WORDS.extend(["alpha", "beta"])
-    monkeypatch.setattr(protected_resource.time, "time", lambda: 1700000000.123)
+    monkeypatch.setattr(
+        protected_resource.time, "time", lambda: 1700000000.123
+    )
     response = resource_http.get("/words", headers=bearer("access-1"))
     assert response.status_code == 200
     assert response.content_type == "application/json"
@@ -248,7 +262,8 @@ def test_delete_requires_delete_and_pops_lifo_safely_when_empty(
     first = resource_http.delete("/words", headers=bearer("access-1"))
     second = resource_http.delete("/words", headers=bearer("access-1"))
     empty = resource_http.delete("/words", headers=bearer("access-1"))
-    assert [first.status_code, second.status_code, empty.status_code] == [204, 204, 204]
+    statuses = [first.status_code, second.status_code, empty.status_code]
+    assert statuses == [204, 204, 204]
     assert first.data == second.data == empty.data == b""
     assert protected_resource.SAVED_WORDS == []
 
@@ -260,12 +275,14 @@ def test_get_words_requires_exact_read_scope(
     issue_access(oauth_store, scope="bread write delete")
     response = resource_http.get("/words", headers=bearer("access-1"))
     assert response.status_code == 403, (
-        "Milestone: GET /words must require exact whitespace-delimited read scope"
+        "Milestone: GET /words must require exact whitespace-delimited "
+        "read scope"
     )
     assert response.content_type == "application/json"
     assert response.get_json() == {"error": "insufficient_scope"}
     assert response.headers["WWW-Authenticate"] == (
-        'Bearer realm="protected-resource", error="insufficient_scope", scope="read"'
+        'Bearer realm="protected-resource", error="insufficient_scope", '
+        'scope="read"'
     )
     assert "words" not in response.get_json()
     assert "timestamp" not in response.get_json()
@@ -287,7 +304,8 @@ def test_add_word_requires_exact_write_scope_without_mutation(
     assert response.content_type == "application/json"
     assert response.get_json() == {"error": "insufficient_scope"}
     assert response.headers["WWW-Authenticate"] == (
-        'Bearer realm="protected-resource", error="insufficient_scope", scope="write"'
+        'Bearer realm="protected-resource", error="insufficient_scope", '
+        'scope="write"'
     )
     assert protected_resource.SAVED_WORDS == ["keep"]
 
@@ -301,11 +319,13 @@ def test_delete_word_requires_exact_delete_scope_without_mutation(
     protected_resource.SAVED_WORDS[:] = ["keep", "last"]
     response = resource_http.delete("/words", headers=bearer("access-1"))
     assert response.status_code == 403, (
-        "Milestone: DELETE /words must require exact delete scope before mutation"
+        "Milestone: DELETE /words must require exact delete scope "
+        "before mutation"
     )
     assert response.content_type == "application/json"
     assert response.get_json() == {"error": "insufficient_scope"}
     assert response.headers["WWW-Authenticate"] == (
-        'Bearer realm="protected-resource", error="insufficient_scope", scope="delete"'
+        'Bearer realm="protected-resource", error="insufficient_scope", '
+        'scope="delete"'
     )
     assert protected_resource.SAVED_WORDS == ["keep", "last"]

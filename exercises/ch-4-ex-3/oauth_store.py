@@ -76,7 +76,9 @@ def reset_schema() -> None:
         )
 
 
-def insert_refresh_token(refresh_token: str, client_id: str, scope: str) -> None:
+def insert_refresh_token(
+    refresh_token: str, client_id: str, scope: str
+) -> None:
     """Store a refresh token for later exchanges."""
     initialize_schema()
     with _connect() as connection:
@@ -150,7 +152,7 @@ def rotate_refresh_token(
     new_refresh_token: str,
     client_id: str,
 ) -> RefreshToken | None:
-    """Atomically consume a client-bound refresh token and store replacements."""
+    """Atomically consume a client-bound refresh token, store replacements."""
     initialize_schema()
     with _connect() as connection:
         connection.execute("BEGIN IMMEDIATE")

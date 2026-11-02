@@ -20,12 +20,19 @@ def test_strict_bearer_and_exact_lookup_errors(resource_http, oauth_store):
         (bearer("unknown-token"), {}),
         ({"Authorization": "Basic known-token"}, {}),
         ({"Authorization": "Bearer"}, {"access_token": "known-token"}),
-        ({"Authorization": "Bearer known-token extra"}, {"access_token": "known-token"}),
+        (
+            {"Authorization": "Bearer known-token extra"},
+            {"access_token": "known-token"},
+        ),
     ):
-        response = resource_http.get("/favorites", headers=headers, query_string=query)
+        response = resource_http.get(
+            "/favorites", headers=headers, query_string=query
+        )
         assert response.status_code == 401
         assert response.get_json() == {"error": "invalid_token"}
-        assert response.headers["WWW-Authenticate"] == 'Bearer realm="protected-resource"'
+        assert response.headers["WWW-Authenticate"] == (
+            'Bearer realm="protected-resource"'
+        )
 
     query_only = resource_http.get(
         "/favorites",
@@ -41,7 +48,7 @@ def test_strict_bearer_and_exact_lookup_errors(resource_http, oauth_store):
 def test_root_learner_owner_selection_returns_exact_alice_and_bob_fixtures(
     resource_http, oauth_store, protected_resource
 ):
-    """One grouped milestone: the untouched starter should fail only this test."""
+    """One grouped milestone: the untouched starter fails only this test."""
     expected = {
         "alice": {
             "user": "Alice",
@@ -87,11 +94,14 @@ def test_root_learner_owner_selection_returns_exact_alice_and_bob_fixtures(
             query_string={"resource_owner": other_owner},
         )
         assert spoofed.get_json() == fixture, (
-            "Favorites must use only the owner persisted on the validated token"
+            "Favorites must use only the owner persisted on the validated "
+            "token"
         )
 
 
-def test_unknown_persisted_owner_has_explicit_empty_result(resource_http, oauth_store):
+def test_unknown_persisted_owner_has_explicit_empty_result(
+    resource_http, oauth_store
+):
     seed_access(oauth_store, "unknown-owner-token", "mallory")
     response = resource_http.get(
         "/favorites", headers=bearer("unknown-owner-token")
@@ -103,7 +113,7 @@ def test_unknown_persisted_owner_has_explicit_empty_result(resource_http, oauth_
     }
 
 
-def test_valid_owner_responses_are_200_without_scope_filtering_or_owner_spoofing(
+def test_owner_responses_are_200_without_scope_filtering_or_spoofing(
     resource_http, oauth_store
 ):
     for owner, scope, spoofed_owner in (
@@ -121,7 +131,10 @@ def test_valid_owner_responses_are_200_without_scope_filtering_or_owner_spoofing
         body = response.get_json()
         assert set(body["favorites"]) == {"movies", "foods", "music"}
         # Empty/narrow scope must not remove categories in this exercise.
-        assert all(isinstance(body["favorites"][key], list) for key in body["favorites"])
+        assert all(
+            isinstance(body["favorites"][key], list)
+            for key in body["favorites"]
+        )
 
 
 def test_resource_database_failure_is_a_retryable_503(

@@ -54,18 +54,15 @@
               </button>
             </span>
           </dd>
-          <dt>Redirect URIs</dt>
+          <dt>Redirect URI</dt>
           <dd>
-            {% for uri in client.redirect_uris %}
-              <span class="copyable-inline" data-copy-container>
-                <code data-copy-value>{{ uri }}</code>
-                <button class="copy-button" type="button" data-copy-button
-                  aria-label="Copy redirect URI" title="Copy redirect URI">
-                  <span class="copy-icon" aria-hidden="true"></span>
-                </button>
-              </span>
-              {% if not loop.last %}<br>{% endif %}
-            {% endfor %}
+            <span class="copyable-inline" data-copy-container>
+              <code data-copy-value>{{ client.redirect_uris }}</code>
+              <button class="copy-button" type="button" data-copy-button
+                aria-label="Copy redirect URI" title="Copy redirect URI">
+                <span class="copy-icon" aria-hidden="true"></span>
+              </button>
+            </span>
           </dd>
         </dl>
       {% endfor %}

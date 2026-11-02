@@ -18,7 +18,12 @@ def generate_test_code_challenge(code_verifier):
     return base64.urlsafe_b64encode(digest).decode("ascii").rstrip("=")
 
 
-def http_response(status=200, payload=None, raw_body=None, content_type="application/json"):
+def http_response(
+    status=200,
+    payload=None,
+    raw_body=None,
+    content_type="application/json",
+):
     response = requests.Response()
     response.status_code = status
     response.url = "https://test.invalid/endpoint"

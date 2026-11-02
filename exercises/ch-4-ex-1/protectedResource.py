@@ -3,14 +3,13 @@
 import re
 from pathlib import Path
 
-from flask import Flask, Response, jsonify, render_template, request
+from flask import Flask, Response, jsonify, render_template
 
-from oauth_store import (
-    AccessToken,
-    DatabaseError,
-    find_access_token,
-    initialize_schema,
-)
+from oauth_store import AccessToken, initialize_schema
+
+# These imports are for the learner's TODOs below; they are unused until then.
+from flask import request  # noqa: F401
+from oauth_store import DatabaseError, find_access_token  # noqa: F401
 
 
 BASE_DIR = Path(__file__).resolve().parent
@@ -63,11 +62,12 @@ def invalid_token() -> OAuthError:
 
 
 def validated_access_record() -> tuple[AccessToken | None, OAuthError | None]:
-    """Learner TODO: return a stored token record or a structured OAuth error."""
-    # TODO: Read the incoming token, reject a missing token with invalid_token(),
-    # look up the exact access-token record, translate DatabaseError with
-    # temporarily_unavailable(), and reject an unknown token with invalid_token().
-    # Return (access_record, None) only when validation succeeds.
+    """Learner TODO: return a stored token record or an OAuth error."""
+    # TODO: Read the incoming token, reject a missing token with
+    # invalid_token(), look up the exact access-token record, translate
+    # DatabaseError with temporarily_unavailable(), and reject an unknown
+    # token with invalid_token(). Return (access_record, None) only when
+    # validation succeeds.
     return None, invalid_token()
 
 

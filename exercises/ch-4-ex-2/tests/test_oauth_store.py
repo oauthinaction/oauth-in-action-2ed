@@ -22,8 +22,9 @@ def test_schema_has_exact_token_tables_and_required_columns(oauth_store):
     assert set(refresh_columns) == {"refresh_token", "client_id", "scope"}
     assert access_columns["access_token"]["pk"] == 1
     assert refresh_columns["refresh_token"]["pk"] == 1
-    assert all(access_columns[name]["notnull"] for name in ("client_id", "scope"))
-    assert all(refresh_columns[name]["notnull"] for name in ("client_id", "scope"))
+    required_columns = ("client_id", "scope")
+    assert all(access_columns[name]["notnull"] for name in required_columns)
+    assert all(refresh_columns[name]["notnull"] for name in required_columns)
 
 
 def test_insert_and_find_tokens_are_exact_and_return_records(oauth_store):
@@ -53,7 +54,9 @@ def test_issue_token_pair_is_atomic_on_refresh_collision(oauth_store):
     assert oauth_store.find_refresh_token("collision")["scope"] == "read"
 
 
-def test_refresh_rotation_preserves_scope_and_rejects_wrong_client(oauth_store):
+def test_refresh_rotation_preserves_scope_and_rejects_wrong_client(
+    oauth_store,
+):
     oauth_store.insert_refresh_token("old-refresh", "client-a", "read delete")
     assert oauth_store.rotate_refresh_token(
         "old-refresh", "wrong-access", "wrong-refresh", "client-b"
@@ -67,8 +70,10 @@ def test_refresh_rotation_preserves_scope_and_rejects_wrong_client(oauth_store):
         "scope": "read delete",
     }
     assert oauth_store.find_refresh_token("old-refresh") is None
-    assert oauth_store.find_access_token("new-access")["scope"] == "read delete"
-    assert oauth_store.find_refresh_token("new-refresh")["scope"] == "read delete"
+    new_access = oauth_store.find_access_token("new-access")
+    new_refresh = oauth_store.find_refresh_token("new-refresh")
+    assert new_access["scope"] == "read delete"
+    assert new_refresh["scope"] == "read delete"
 
 
 def test_refresh_rotation_rolls_back_consumption_on_collision(oauth_store):

@@ -38,8 +38,21 @@ PROTECTED_RESOURCE = load_root_module(
 )
 CLIENT = load_root_module("ch4_ex3_root_client", "client.py")
 
-for flask_app in (CLIENT.app, AUTHORIZATION_SERVER.app, PROTECTED_RESOURCE.app):
+for flask_app in (
+    CLIENT.app,
+    AUTHORIZATION_SERVER.app,
+    PROTECTED_RESOURCE.app,
+):
     flask_app.config.update(TESTING=True)
+
+CLIENT_GLOBALS = (
+    "state",
+    "code_verifier",
+    "access_token",
+    "refresh_token",
+    "scope",
+    "last_refresh_epoch",
+)
 
 
 @pytest.fixture
@@ -79,7 +92,7 @@ def resource_http():
 
 @pytest.fixture(autouse=True)
 def isolated_runtime(tmp_path, monkeypatch):
-    for name in ("state", "code_verifier", "access_token", "refresh_token", "scope"):
+    for name in CLIENT_GLOBALS:
         setattr(CLIENT, name, None)
     AUTHORIZATION_SERVER.approval_requests.clear()
     AUTHORIZATION_SERVER.authorization_codes.clear()
@@ -89,19 +102,21 @@ def isolated_runtime(tmp_path, monkeypatch):
 
     guarded_get = Mock(
         side_effect=AssertionError(
-            "Unexpected real requests.get attempt; configure the requests_get fixture"
+            "Unexpected real requests.get attempt; "
+            "configure the requests_get fixture"
         )
     )
     guarded_post = Mock(
         side_effect=AssertionError(
-            "Unexpected real requests.post attempt; configure the requests_post fixture"
+            "Unexpected real requests.post attempt; "
+            "configure the requests_post fixture"
         )
     )
     monkeypatch.setattr(CLIENT.requests, "get", guarded_get)
     monkeypatch.setattr(CLIENT.requests, "post", guarded_post)
     yield
 
-    for name in ("state", "code_verifier", "access_token", "refresh_token", "scope"):
+    for name in CLIENT_GLOBALS:
         setattr(CLIENT, name, None)
     AUTHORIZATION_SERVER.approval_requests.clear()
     AUTHORIZATION_SERVER.authorization_codes.clear()

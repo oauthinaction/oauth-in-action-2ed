@@ -2,6 +2,14 @@
 
 This is a **Python 3.14** practitioner suite for the root implementation of Chapter 4 Exercise 4. It checks the inherited OAuth authorization-code flow (state, S256 PKCE, exact redirect URI, OAuth Basic client authentication, granted scope, one-time codes, rotating refresh tokens), then checks this exercise's resource-owner binding from approval through storage and the Favorites API.
 
+## Client behavior under test
+
+The client is the Chapter 4 base client. `/authorize` sends a fresh random `state`, an S256 PKCE challenge, the single registered redirect URI, and the requested scope `movies foods music`. `/callback` checks `error` first, then rejects any `state` that does not match with "State value did not match", then checks the PKCE verifier and the code. The authorization server's approval page shows the received state next to the Alice/Bob selector.
+
+Only HTTP status 200 counts as success, for the token endpoint and for the Favorites API. Each click on "Get the resource owner's favorites" sends exactly one `GET` to `http://localhost:9002/favorites` with only the Bearer header and renders the returned owner and lists with the granted scope. Any other status clears the access token: a 401 returns the client page with a notice, and any other status shows `Status: N, unable to fetch favorites.` Connection errors clear the access token and show a controlled error page instead of HTTP 500. Response bodies from the exercise's own servers are trusted and not shape-checked.
+
+The client never refreshes automatically. The user clicks the "Refresh token" button (`POST /refresh`), which rotates the token pair, records the Last refresh time, and redirects back to the client page with 303. Another refresh is blocked for 20 seconds with a "You need to wait N seconds" notice. A 401 within those 20 seconds explains that the fresh token was rejected and that this is not a freshness problem.
+
 ## Run the suite
 
 From this exact exercise directory, create a Python 3.14 environment and install both runtime and test dependencies:
@@ -20,13 +28,13 @@ The test dependency is pinned to `pytest==9.1.1`. The exercise runtime requireme
 
 The suite explicitly imports only these files from the exercise root: `oauth_store.py`, `authorizationServer.py`, `client.py`, and `protectedResource.py`. It never imports or executes `completed/protectedResource.py`; `completed/` is an answer key, not test input. Run pytest from this exercise tree so similarly named modules from another chapter or checkout cannot mask the learner's work.
 
-On the untouched starter, the expected result is **one clear grouped failure**:
+On the untouched starter, the expected result is **one clear grouped failure** (`1 failed, 70 passed`):
 
 ```text
 test_root_learner_owner_selection_returns_exact_alice_and_bob_fixtures
 ```
 
-That milestone asks the root `protectedResource.py` to inspect the already validated `access_record["resource_owner"]`, return the exact Alice fixture for `alice`, the exact Bob fixture for `bob`, and the explicit empty Unknown fixture otherwise. The corrected Alice movie title is `The Multidimensional Vector`. Once that single TODO is implemented, the full suite should pass.
+That milestone asks the root `protectedResource.py` to inspect the already validated `access_record["resource_owner"]`, return the exact Alice fixture for `alice`, the exact Bob fixture for `bob`, and the explicit empty Unknown fixture otherwise. The corrected Alice movie title is `The Multidimensional Vector`. Once that single TODO is implemented, the full suite should pass. Copying `completed/protectedResource.py` over the root file in a temporary copy of this folder gives `71 passed`.
 
 The authorization page's Alice/Bob selector is intentionally insecure. It is a visible exercise fixture for demonstrating owner propagation, **not authentication** and not a production design. The owner must come only from a validated approval selection, be bound to the authorization code, and then be read from persisted access/refresh records. Request query values, headers, token-request owner fields, display names, and scope must never choose or override an owner.
 

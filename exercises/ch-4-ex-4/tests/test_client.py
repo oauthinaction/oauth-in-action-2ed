@@ -1,11 +1,25 @@
-import requests
+from datetime import datetime
+from unittest.mock import Mock
 
 import pytest
+import requests
 
-from helpers import oauth_response
+from helpers import (
+    CALLBACK,
+    CLIENT_ID,
+    CLIENT_SECRET,
+    TEST_CODE_CHALLENGE,
+    TEST_CODE_VERIFIER,
+    basic_headers,
+    generate_test_code_challenge,
+    oauth_response,
+    redirect_parameters,
+)
 
 
-VALID_FAVORITES = {
+FAVORITES_URL = "http://localhost:9002/favorites"
+TOKEN_URL = "http://localhost:9001/token"
+ALICE_FAVORITES = {
     "user": "Alice",
     "favorites": {
         "movies": ["The Multidimensional Vector"],
@@ -13,268 +27,834 @@ VALID_FAVORITES = {
         "music": ["techno"],
     },
 }
+UNAUTHORIZED_NOTICE = b"The protected resource returned 401 Unauthorized."
 
 
-def test_authorize_uses_state_pkce_and_exact_registered_redirect(client_http, client_module):
-    response = client_http.get("/authorize")
-    assert response.status_code == 302
-    location = response.headers["Location"]
-    assert location.startswith(client_module.AUTH_SERVER["authorization_endpoint"] + "?")
-    assert "redirect_uri=http%3A%2F%2Flocalhost%3A9000%2Fcallback" in location
-    assert "code_challenge_method=S256" in location
-    assert client_module.state
-    assert 43 <= len(client_module.code_verifier) <= 128
-    assert client_module.generate_code_challenge(client_module.code_verifier) in location
+def expected_local_time(epoch):
+    local_time = datetime.fromtimestamp(epoch).astimezone()
+    return local_time.strftime("%Y-%m-%d %H:%M:%S %Z")
 
 
-def test_callback_requires_matching_state_and_consumes_it(
-    client_http, client_module, requests_post
-):
-    client_module.state = "expected"
-    client_module.code_verifier = "A" * 43
-    mismatch = client_http.get("/callback?state=wrong&code=code")
-    assert mismatch.status_code == 200
-    assert b"State value did not match" in mismatch.data
-    requests_post.assert_not_called()
+def refresh_button_markup(page):
+    start = page.index('<form class="inline-form" action="/refresh"')
+    end = page.index("</form>", start)
+    return page[start:end]
 
-    client_module.state = "expected"
-    client_module.code_verifier = "A" * 43
-    requests_post.return_value = oauth_response(
-        payload={
-            "access_token": "access",
-            "refresh_token": "refresh",
-            "scope": "movies",
-            "token_type": "bEaReR",
-        }
+
+def test_build_url_preserves_existing_query_and_fragment(client_module):
+    url = client_module.build_url(
+        "https://server.example/authorize?keep=yes#chapter",
+        {"existing": "a value", "keep": "updated"},
     )
-    success = client_http.get("/callback?state=expected&code=code")
-    replay = client_http.get("/callback?state=expected&code=code")
-    assert success.status_code == 200
-    assert b"access" in success.data
-    assert b"State value did not match" in replay.data
-    assert client_module.state is None and client_module.code_verifier is None
-    requests_post.assert_called_once()
-    _, kwargs = requests_post.call_args
-    assert kwargs["data"]["code_verifier"] == "A" * 43
-    assert kwargs["timeout"] == client_module.REQUEST_TIMEOUT
-    assert kwargs["allow_redirects"] is False
-    assert kwargs["headers"]["Authorization"].startswith("Basic ")
-
-
-@pytest.mark.parametrize("status", [200, 204, 299])
-def test_favorites_uses_exact_bounded_nonredirecting_get_and_accepts_exact_2xx(
-    status, client_http, client_module, requests_get
-):
-    client_module.access_token = "access-token"
-    client_module.scope = "movies foods music"
-    requests_get.return_value = oauth_response(status=status, payload=VALID_FAVORITES)
-    response = client_http.get("/favorites")
-    assert response.status_code == 200
-    requests_get.assert_called_once_with(
-        "http://localhost:9002/favorites",
-        headers={"Authorization": "Bearer access-token"},
-        timeout=5,
-        allow_redirects=False,
+    assert url == (
+        "https://server.example/authorize"
+        "?keep=updated&existing=a+value#chapter"
+    ), (
+        "Build the authorization URL without discarding existing query "
+        "or fragment data"
     )
 
 
-@pytest.mark.parametrize("status", [300, 302, 400, 500])
-def test_favorites_rejects_redirects_and_every_non_2xx_without_refresh(
-    status, client_http, client_module, requests_get, requests_post
+def test_basic_credentials_match_oauth_encoding(client_module):
+    expected = basic_headers("client id", "secret:+ value")["Authorization"]
+    actual = "Basic " + client_module.encode_client_credentials(
+        "client id", "secret:+ value"
+    )
+    assert actual == expected, (
+        "Percent-encode each client credential before constructing "
+        "OAuth Basic authentication"
+    )
+
+
+def test_client_generate_code_challenge_matches_rfc_7636(client_module):
+    assert (
+        generate_test_code_challenge(TEST_CODE_VERIFIER)
+        == TEST_CODE_CHALLENGE
+    )
+    assert (
+        client_module.generate_code_challenge(TEST_CODE_VERIFIER)
+        == TEST_CODE_CHALLENGE
+    ), (
+        "Derive the RFC 7636 S256 challenge with base64url encoding "
+        "and no padding"
+    )
+
+
+def test_generated_code_verifier_has_rfc_7636_strength_and_shape(
+    client_module,
 ):
-    client_module.access_token = "access-token"
-    client_module.refresh_token = "refresh-token"
-    requests_get.return_value = oauth_response(status=status, payload=VALID_FAVORITES)
-    response = client_http.get("/favorites")
-    assert response.status_code == 200
-    assert f"Status {status}".encode() in response.data
-    assert client_module.access_token is None
-    assert client_module.refresh_token == "refresh-token"
-    assert requests_get.call_count == 1
-    requests_post.assert_not_called()
+    allowed_characters = frozenset(
+        "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
+        "abcdefghijklmnopqrstuvwxyz"
+        "0123456789-._~"
+    )
+    generated_verifiers = {
+        client_module.generate_code_verifier()
+        for _ in range(32)
+    }
+    assert len(generated_verifiers) == 32, (
+        "Generate a fresh cryptographically random PKCE verifier "
+        "per authorization request"
+    )
+    for verifier in generated_verifiers:
+        assert 43 <= len(verifier) <= 128
+        assert set(verifier).issubset(allowed_characters)
+        challenge = client_module.generate_code_challenge(verifier)
+        assert len(challenge) == 43 and "=" not in challenge
 
 
-@pytest.mark.parametrize(
-    "payload,raw_body",
-    [
-        (None, b'{"user":'),
-        (["not", "an", "object"], None),
-        ({"user": "Alice"}, None),
-        ({**VALID_FAVORITES, "extra": True}, None),
-        ({"user": "Alice", "favorites": {"movies": [], "foods": []}}, None),
-        ({"user": "Alice", "favorites": {"movies": "x", "foods": [], "music": []}}, None),
-        ({"user": "Alice", "favorites": {"movies": [1], "foods": [], "music": []}}, None),
-    ],
-)
-def test_favorites_requires_exact_json_shape(
-    payload, raw_body, client_http, client_module, requests_get
+def test_client_registration_uses_one_redirect_uri_and_requested_scope(
+    client_module,
 ):
-    client_module.access_token = "access-token"
-    requests_get.return_value = oauth_response(payload=payload, raw_body=raw_body)
-    response = client_http.get("/favorites")
-    assert response.status_code == 200
-    assert b"Favorites API returned an invalid JSON object" in response.data
+    assert client_module.CLIENT["redirect_uris"] == CALLBACK, (
+        "The client registers exactly one redirect URI as a string"
+    )
+    assert client_module.CLIENT["scope"] == "movies foods music"
+    assert client_module.FAVORITES_API == FAVORITES_URL
 
 
-def test_one_401_refreshes_rotated_pair_and_retries_once(
-    client_http, client_module, requests_get, requests_post
+def test_authorization_request_sends_scope_state_and_pkce(
+    client_module,
+    client_http,
+    monkeypatch,
 ):
+    monkeypatch.setattr(
+        client_module,
+        "generate_code_verifier",
+        lambda: TEST_CODE_VERIFIER,
+    )
     client_module.access_token = "old-access"
-    client_module.refresh_token = "old-refresh"
     client_module.scope = "old-scope"
-    requests_get.side_effect = [
-        oauth_response(status=401, payload={"error": "invalid_token"}),
-        oauth_response(status=200, payload=VALID_FAVORITES),
-    ]
+    client_module.refresh_token = "retained-refresh"
+    response = client_http.get("/authorize")
+    parsed, params = redirect_parameters(response)
+    assert response.status_code == 302
+    assert parsed.geturl().startswith("http://localhost:9001/authorize?")
+    assert params == {
+        "response_type": "code",
+        "client_id": CLIENT_ID,
+        "redirect_uri": CALLBACK,
+        "scope": "movies foods music",
+        "state": client_module.state,
+        "code_challenge": generate_test_code_challenge(TEST_CODE_VERIFIER),
+        "code_challenge_method": "S256",
+    }, "Request the movies, foods, and music scopes with state and PKCE"
+    assert params["state"], "Send a fresh state value"
+    assert client_module.code_verifier == TEST_CODE_VERIFIER
+    assert client_module.access_token is None
+    assert client_module.scope is None
+    assert client_module.refresh_token == "retained-refresh"
+
+
+def test_each_authorization_request_uses_a_new_state(
+    client_module, client_http
+):
+    client_http.get("/authorize")
+    first_state = client_module.state
+    client_http.get("/authorize")
+    assert first_state and client_module.state
+    assert client_module.state != first_state
+
+
+def test_callback_code_exchange_contract(
+    client_module,
+    client_http,
+    requests_post,
+):
+    client_module.state = "state-123"
+    client_module.code_verifier = TEST_CODE_VERIFIER
     requests_post.return_value = oauth_response(
         payload={
-            "access_token": "new-access",
-            "refresh_token": "new-refresh",
-            "scope": "movies foods music",
+            "access_token": "access-123",
+            "refresh_token": "refresh-123",
+            "scope": "movies foods",
             "token_type": "Bearer",
         }
     )
-
-    response = client_http.get("/favorites")
-    assert response.status_code == 200
-    assert requests_get.call_count == 2
-    assert requests_get.call_args_list[0].kwargs["headers"] == {
-        "Authorization": "Bearer old-access"
-    }
-    assert requests_get.call_args_list[1].kwargs["headers"] == {
-        "Authorization": "Bearer new-access"
-    }
-    requests_post.assert_called_once()
-    _, kwargs = requests_post.call_args
-    assert kwargs["data"] == {
-        "grant_type": "refresh_token",
-        "refresh_token": "old-refresh",
-    }
-    assert kwargs["timeout"] == 5 and kwargs["allow_redirects"] is False
-    assert client_module.access_token == "new-access"
-    assert client_module.refresh_token == "new-refresh"
-    assert client_module.scope == "movies foods music"
-
-
-def test_second_401_is_final_and_never_refreshes_twice(
-    client_http, client_module, requests_get, requests_post
-):
-    client_module.access_token = "old-access"
-    client_module.refresh_token = "old-refresh"
-    requests_get.side_effect = [
-        oauth_response(status=401, payload={"error": "invalid_token"}),
-        oauth_response(status=401, payload={"error": "invalid_token"}),
-    ]
-    requests_post.return_value = oauth_response(
-        payload={
-            "access_token": "new-access",
-            "refresh_token": "new-refresh",
-            "scope": "movies",
-            "token_type": "bearer",
-        }
+    response = client_http.get(
+        "/callback",
+        query_string={"code": "code-123", "state": "state-123"},
     )
-    response = client_http.get("/favorites")
-    assert b"Status 401" in response.data
-    assert requests_get.call_count == 2
-    assert requests_post.call_count == 1
+    assert response.status_code == 200
+    requests_post.assert_called_once_with(
+        TOKEN_URL,
+        data={
+            "grant_type": "authorization_code",
+            "code": "code-123",
+            "redirect_uri": CALLBACK,
+            "code_verifier": TEST_CODE_VERIFIER,
+        },
+        headers=basic_headers(CLIENT_ID, CLIENT_SECRET),
+        timeout=5,
+        allow_redirects=False,
+    )
+    assert client_module.code_verifier is None, (
+        "Consume the PKCE verifier after the token request is prepared"
+    )
+    assert client_module.access_token == "access-123"
+    assert client_module.refresh_token == "refresh-123"
+    assert client_module.scope == "movies foods"
+    page = response.get_data(as_text=True)
+    assert "<dt>Access token</dt>" in page
+    assert "movies foods" in page, "Show the granted scope"
+
+
+def test_callback_keeps_refresh_token_when_none_is_issued(
+    client_module,
+    client_http,
+    requests_post,
+):
+    client_module.state = "state-123"
+    client_module.code_verifier = TEST_CODE_VERIFIER
+    client_module.refresh_token = "existing-refresh"
+    requests_post.return_value = oauth_response(
+        payload={"access_token": "access-123", "scope": "movies"}
+    )
+    client_http.get(
+        "/callback",
+        query_string={"code": "code-123", "state": "state-123"},
+    )
+    assert client_module.access_token == "access-123"
+    assert client_module.refresh_token == "existing-refresh"
+
+
+def test_callback_without_stored_verifier_makes_no_token_request(
+    client_module,
+    client_http,
+    requests_post,
+):
+    client_module.state = "state-123"
+    client_module.code_verifier = None
+    response = client_http.get(
+        "/callback",
+        query_string={"code": "code-123", "state": "state-123"},
+    )
+    assert response.status_code == 200
+    assert b"Missing PKCE code verifier" in response.data
+    requests_post.assert_not_called()
+
+
+def test_callback_error_consumes_verifier_without_token_request(
+    client_module,
+    client_http,
+    requests_post,
+):
+    client_module.state = "state-123"
+    client_module.code_verifier = TEST_CODE_VERIFIER
+    response = client_http.get(
+        "/callback",
+        query_string={"error": "access_denied"},
+    )
+    assert response.status_code == 200
+    assert b"access_denied" in response.data
+    assert client_module.code_verifier is None, (
+        "Consume the PKCE verifier before handling an authorization error"
+    )
+    requests_post.assert_not_called()
+
+
+@pytest.mark.parametrize(
+    ("stored_state", "returned_state"),
+    [
+        ("state-123", "other-state"),
+        ("state-123", None),
+        (None, "state-123"),
+    ],
+    ids=["different-state", "missing-state", "no-authorization-request"],
+)
+def test_callback_rejects_state_mismatch(
+    client_module,
+    client_http,
+    requests_post,
+    stored_state,
+    returned_state,
+):
+    client_module.state = stored_state
+    client_module.code_verifier = TEST_CODE_VERIFIER
+    query = {"code": "code-123"}
+    if returned_state is not None:
+        query["state"] = returned_state
+    response = client_http.get("/callback", query_string=query)
+    assert response.status_code == 200
+    assert b"State value did not match" in response.data, (
+        "Reject a callback whose state is not the one this client sent"
+    )
+    requests_post.assert_not_called()
+
+
+@pytest.mark.parametrize("token_status", [302, 201])
+def test_callback_rejects_token_endpoint_status_other_than_200(
+    client_module,
+    client_http,
+    requests_post,
+    token_status,
+):
+    client_module.state = "state-123"
+    client_module.code_verifier = TEST_CODE_VERIFIER
+    requests_post.return_value = oauth_response(
+        status=token_status,
+        payload={
+            "access_token": "redirect-access",
+            "refresh_token": "redirect-refresh",
+            "scope": "movies",
+        },
+    )
+    response = client_http.get(
+        "/callback",
+        query_string={"code": "code-123", "state": "state-123"},
+    )
+    assert response.status_code == 200
+    assert f"server response: {token_status}".encode() in response.data, (
+        "Accept token responses only when the endpoint returns status 200"
+    )
+    assert client_module.access_token is None
+    assert client_module.refresh_token is None
+    assert client_module.scope is None
+    assert b"redirect-access" not in response.data
+
+
+def test_callback_connection_failure_is_rendered_not_500(
+    client_module,
+    client_http,
+    requests_post,
+):
+    client_module.state = "state-123"
+    client_module.code_verifier = TEST_CODE_VERIFIER
+    requests_post.side_effect = requests.ConnectionError(
+        "token endpoint unavailable",
+    )
+    response = client_http.get(
+        "/callback",
+        query_string={"code": "code-123", "state": "state-123"},
+    )
+    assert response.status_code == 200, (
+        "Render a controlled token-endpoint error instead of HTTP 500"
+    )
+    assert b"Unable to fetch access token" in response.data
     assert client_module.access_token is None
 
 
-def test_favorites_timeout_is_rendered_without_a_live_retry(
-    client_http, client_module, requests_get, requests_post
+def test_favorites_request_uses_bearer_get_without_refresh(
+    client_module,
+    client_http,
+    requests_get,
+    requests_post,
+    monkeypatch,
 ):
-    client_module.access_token = "access"
-    client_module.refresh_token = "refresh"
-    requests_get.side_effect = requests.Timeout("timed out")
+    client_module.access_token = "access-123"
+    client_module.scope = "movies foods music"
+    refresh_helper = Mock()
+    monkeypatch.setattr(client_module, "refresh_access_token", refresh_helper)
+    requests_get.return_value = oauth_response(payload=ALICE_FAVORITES)
     response = client_http.get("/favorites")
     assert response.status_code == 200
-    assert b"Unable to call the Favorites API: timed out" in response.data
-    assert requests_get.call_count == 1
+    # One GET to the Favorites API with only the Bearer header.
+    requests_get.assert_called_once_with(
+        FAVORITES_URL,
+        headers={"Authorization": "Bearer access-123"},
+        timeout=5,
+        allow_redirects=False,
+    )
+    requests_post.assert_not_called()
+    refresh_helper.assert_not_called()
+    assert client_module.access_token == "access-123"
+
+
+def test_favorites_page_renders_returned_owner_lists_and_scope(
+    client_module,
+    client_http,
+    requests_get,
+):
+    client_module.access_token = "access-123"
+    client_module.scope = "movies foods music"
+    requests_get.return_value = oauth_response(
+        payload={
+            "user": "Bob",
+            "favorites": {
+                "movies": ["An Unrequited Love"],
+                "foods": ["kale"],
+                "music": [],
+            },
+        }
+    )
+    response = client_http.get("/favorites")
+    page = response.get_data(as_text=True)
+    assert response.status_code == 200
+    assert "<h1>Bob's favorites</h1>" in page
+    assert "An Unrequited Love" in page
+    assert "kale" in page
+    assert "No music were returned." in page
+    assert "<code data-copy-value>movies foods music</code>" in page, (
+        "Show the granted scope on the favorites page"
+    )
+
+
+def test_favorites_page_shows_none_when_no_scope_was_granted(
+    client_module,
+    client_http,
+    requests_get,
+):
+    client_module.access_token = "access-123"
+    client_module.scope = None
+    requests_get.return_value = oauth_response(payload=ALICE_FAVORITES)
+    response = client_http.get("/favorites")
+    assert b'<span class="token value-missing">NONE</span>' in response.data
+
+
+def test_favorites_without_access_token_makes_no_request(
+    client_module,
+    client_http,
+    requests_get,
+):
+    client_module.access_token = None
+    response = client_http.get("/favorites")
+    assert response.status_code == 200
+    assert b"Missing Access Token" in response.data
+    requests_get.assert_not_called()
+
+
+@pytest.mark.parametrize("status", [201, 302, 400, 500])
+def test_favorites_status_other_than_200_is_an_error_without_refresh(
+    client_module,
+    client_http,
+    requests_get,
+    requests_post,
+    monkeypatch,
+    status,
+):
+    client_module.access_token = "access-123"
+    client_module.refresh_token = "refresh-123"
+    refresh_helper = Mock()
+    monkeypatch.setattr(client_module, "refresh_access_token", refresh_helper)
+    requests_get.return_value = oauth_response(
+        status=status,
+        payload={"user": "Status Body User", "favorites": {}},
+    )
+    response = client_http.get("/favorites")
+    assert response.status_code == 200
+    assert (
+        f"Status: {status}, unable to fetch favorites.".encode()
+        in response.data
+    ), "Accept Favorites API responses only for status 200"
+    assert b"Status Body User" not in response.data
+    assert client_module.access_token is None
+    assert client_module.refresh_token == "refresh-123"
+    requests_get.assert_called_once()
+    requests_post.assert_not_called()
+    refresh_helper.assert_not_called()
+
+
+@pytest.mark.parametrize(
+    "failure",
+    [
+        requests.ConnectionError("favorites unavailable"),
+        requests.Timeout("timed out"),
+    ],
+    ids=["connection-error", "timeout"],
+)
+def test_favorites_connection_failure_is_rendered_not_500(
+    client_module,
+    client_http,
+    requests_get,
+    requests_post,
+    failure,
+):
+    client_module.access_token = "access-123"
+    client_module.refresh_token = "refresh-123"
+    requests_get.side_effect = failure
+    response = client_http.get("/favorites")
+    assert response.status_code == 200, (
+        "Render a controlled Favorites API error instead of HTTP 500"
+    )
+    assert b"Unable to fetch favorites" in response.data
+    assert client_module.access_token is None
+    assert client_module.refresh_token == "refresh-123"
+    requests_get.assert_called_once()
+    requests_post.assert_not_called()
+
+
+def test_401_is_reported_and_never_refreshes_automatically(
+    client_module,
+    client_http,
+    requests_get,
+    requests_post,
+    monkeypatch,
+):
+    client_module.access_token = "expired-access"
+    client_module.refresh_token = "refresh-123"
+    refresh_helper = Mock()
+    monkeypatch.setattr(client_module, "refresh_access_token", refresh_helper)
+    requests_get.return_value = oauth_response(
+        status=401,
+        payload={"error": "invalid_token"},
+    )
+    response = client_http.get("/favorites")
+    page = response.get_data(as_text=True)
+    assert response.status_code == 200
+    assert UNAUTHORIZED_NOTICE in response.data, (
+        "Tell the user that the protected resource returned a 401"
+    )
+    assert "<dt>Access token</dt>" in page, (
+        "Report the 401 on the client page so the Refresh token button "
+        "is available"
+    )
+    assert "Refresh token" in refresh_button_markup(page)
+    refresh_helper.assert_not_called()
+    requests_get.assert_called_once()
     requests_post.assert_not_called()
     assert client_module.access_token is None
+    assert client_module.refresh_token == "refresh-123"
 
 
-@pytest.mark.parametrize(
-    "token_fields",
-    [
-        {},
-        {"token_type": 123},
-        {"token_type": "Basic"},
-    ],
-    ids=["missing", "non-string", "unsupported"],
-)
-def test_callback_rejects_invalid_token_type_and_clears_pair(
-    token_fields, client_http, client_module, requests_post
+def test_401_right_after_refresh_is_not_a_freshness_problem(
+    client_module,
+    client_http,
+    requests_get,
+    monkeypatch,
 ):
-    client_module.state = "expected"
-    client_module.code_verifier = "A" * 43
-    client_module.access_token = "stale-access"
-    client_module.refresh_token = "stale-refresh"
-    client_module.scope = "stale-scope"
-    requests_post.return_value = oauth_response(
-        payload={
-            "access_token": "access",
-            "refresh_token": "refresh",
-            "scope": "movies",
-            **token_fields,
-        }
+    client_module.access_token = "just-refreshed-access"
+    client_module.last_refresh_epoch = 1_000
+    monkeypatch.setattr(client_module.time, "time", lambda: 1_005)
+    refresh_helper = Mock()
+    monkeypatch.setattr(client_module, "refresh_access_token", refresh_helper)
+    requests_get.return_value = oauth_response(
+        status=401,
+        payload={"error": "invalid_token"},
+    )
+    response = client_http.get("/favorites")
+    assert response.status_code == 200
+    assert b"This is not a freshness problem." in response.data, (
+        "Within 20 seconds of a refresh, explain that a fresh token was "
+        "rejected"
+    )
+    assert UNAUTHORIZED_NOTICE not in response.data
+    refresh_helper.assert_not_called()
+    assert client_module.access_token is None
+
+    monkeypatch.setattr(client_module.time, "time", lambda: 1_020)
+    client_module.access_token = "older-access"
+    later = client_http.get("/favorites")
+    assert UNAUTHORIZED_NOTICE in later.data, (
+        "Once the 20-second wait is over, suggest refreshing the token again"
     )
 
-    response = client_http.get("/callback?state=expected&code=code")
 
-    assert b"Authorization server returned an invalid token response" in response.data
-    assert client_module.access_token is None
-    assert client_module.refresh_token is None
-    assert client_module.scope is None
+def test_refresh_button_runs_refresh_and_records_epoch(
+    client_module,
+    client_http,
+    requests_get,
+    monkeypatch,
+):
+    refreshed_at = 1_700_000_000
+    monkeypatch.setattr(client_module.time, "time", lambda: refreshed_at)
+    client_module.refresh_token = "refresh-123"
+
+    def refresh_once():
+        client_module.access_token = "replacement-access"
+        client_module.refresh_token = "rotated-refresh"
+        return True
+
+    refresh_helper = Mock(side_effect=refresh_once)
+    monkeypatch.setattr(client_module, "refresh_access_token", refresh_helper)
+    response = client_http.post("/refresh")
+    assert response.status_code == 303
+    assert response.headers["Location"] == "/"
+    refresh_helper.assert_called_once_with()
+    # Refreshing never calls the Favorites API; the user clicks again.
+    requests_get.assert_not_called()
+    assert client_module.last_refresh_epoch == refreshed_at
+    home = client_http.get("/")
+    assert expected_local_time(refreshed_at).encode() in home.data, (
+        "Show the last refresh time in this machine's local timezone"
+    )
+    assert b"replacement-access" in home.data
+    assert b"rotated-refresh" in home.data
+
+
+def test_refresh_requires_post(client_http):
+    response = client_http.get("/refresh")
+    assert response.status_code == 405
+
+
+def test_failed_refresh_reports_error_and_keeps_last_epoch(
+    client_module,
+    client_http,
+    requests_post,
+    monkeypatch,
+):
+    client_module.refresh_token = "refresh-123"
+    client_module.last_refresh_epoch = 1_000
+    monkeypatch.setattr(client_module.time, "time", lambda: 1_100)
+    refresh_helper = Mock(return_value=False)
+    monkeypatch.setattr(client_module, "refresh_access_token", refresh_helper)
+    response = client_http.post("/refresh")
+    assert response.status_code == 200
+    assert b"Unable to refresh token." in response.data
+    refresh_helper.assert_called_once_with()
+    assert client_module.last_refresh_epoch == 1_000
+    requests_post.assert_not_called()
+
+
+def test_refresh_is_blocked_for_20_seconds_after_last_refresh(
+    client_module,
+    client_http,
+    monkeypatch,
+):
+    client_module.refresh_token = "refresh-123"
+    client_module.last_refresh_epoch = 1_000
+    refresh_helper = Mock(return_value=True)
+    monkeypatch.setattr(client_module, "refresh_access_token", refresh_helper)
+
+    monkeypatch.setattr(client_module.time, "time", lambda: 1_005)
+    blocked = client_http.post("/refresh")
+    blocked_page = blocked.get_data(as_text=True)
+    assert blocked.status_code == 200
+    assert (
+        "You need to wait 15 seconds before you can refresh again."
+        in blocked_page
+    ), "Tell the user how long to wait before refreshing again"
+    assert "<dt>Access token</dt>" in blocked_page, (
+        "Show the wait message on the client page, not an error page"
+    )
+    refresh_helper.assert_not_called()
+    assert client_module.last_refresh_epoch == 1_000
+
+    monkeypatch.setattr(client_module.time, "time", lambda: 1_019)
+    last_second = client_http.post("/refresh")
+    assert (
+        b"You need to wait 1 seconds before you can refresh again."
+        in last_second.data
+    )
+    refresh_helper.assert_not_called()
+
+    monkeypatch.setattr(client_module.time, "time", lambda: 1_020)
+    allowed = client_http.post("/refresh")
+    assert allowed.status_code == 303
+    refresh_helper.assert_called_once_with()
+    assert client_module.last_refresh_epoch == 1_020
+
+
+def test_refresh_without_refresh_token_is_rejected(
+    client_module,
+    client_http,
+    monkeypatch,
+):
+    client_module.refresh_token = None
+    refresh_helper = Mock()
+    monkeypatch.setattr(client_module, "refresh_access_token", refresh_helper)
+    response = client_http.post("/refresh")
+    assert b"No refresh token available." in response.data
+    refresh_helper.assert_not_called()
 
 
 @pytest.mark.parametrize(
-    "token_fields",
+    ("refresh_token", "last_refresh_epoch"),
     [
-        {},
-        {"token_type": 123},
-        {"token_type": "Basic"},
+        ("refresh-123", None),
+        ("refresh-123", 1_000),
+        (None, None),
     ],
-    ids=["missing", "non-string", "unsupported"],
+    ids=["no-refresh-yet", "during-wait", "no-refresh-token"],
 )
-def test_refresh_rejects_invalid_token_type_and_clears_all_state(
-    token_fields, client_module, requests_post
+def test_refresh_button_is_always_enabled(
+    client_module,
+    client_http,
+    monkeypatch,
+    refresh_token,
+    last_refresh_epoch,
 ):
-    client_module.access_token = "old-access"
-    client_module.refresh_token = "old-refresh"
+    client_module.refresh_token = refresh_token
+    client_module.last_refresh_epoch = last_refresh_epoch
+    monkeypatch.setattr(client_module.time, "time", lambda: 1_005)
+    page = client_http.get("/").get_data(as_text=True)
+    assert "disabled" not in refresh_button_markup(page), (
+        "Never disable the Refresh token button; explain any wait "
+        "after it is clicked"
+    )
+    assert "You need to wait" not in page, (
+        "Show the wait message only after Refresh token is clicked"
+    )
+
+
+def test_refresh_button_flow_with_real_helper(
+    client_module,
+    client_http,
+    requests_post,
+    monkeypatch,
+):
+    monkeypatch.setattr(client_module.time, "time", lambda: 2_000)
+    client_module.refresh_token = "refresh-123"
+    requests_post.return_value = oauth_response(
+        payload={
+            "access_token": "new-access",
+            "refresh_token": "rotated-refresh",
+            "scope": "movies foods music",
+        }
+    )
+    response = client_http.post("/refresh")
+    assert response.status_code == 303
+    requests_post.assert_called_once()
+    assert requests_post.call_args.args[0] == TOKEN_URL
+    assert client_module.access_token == "new-access"
+    assert client_module.refresh_token == "rotated-refresh"
+    assert client_module.scope == "movies foods music"
+    assert client_module.last_refresh_epoch == 2_000
+
+
+def test_refresh_posts_exact_contract_and_rotates_tokens(
+    client_module,
+    requests_post,
+):
+    client_module.access_token = None
+    client_module.refresh_token = "refresh-123"
     client_module.scope = "old-scope"
     requests_post.return_value = oauth_response(
         payload={
             "access_token": "new-access",
-            "refresh_token": "new-refresh",
-            "scope": "new-scope",
-            **token_fields,
+            "refresh_token": "rotated-refresh",
+            "scope": "movies music",
+            "token_type": "Bearer",
         }
     )
+    result = client_module.refresh_access_token()
+    assert result is True, (
+        "Exchange the refresh token, store both rotated tokens, "
+        "and report success"
+    )
+    requests_post.assert_called_once_with(
+        TOKEN_URL,
+        data={
+            "grant_type": "refresh_token",
+            "refresh_token": "refresh-123",
+        },
+        headers=basic_headers(CLIENT_ID, CLIENT_SECRET),
+        timeout=5,
+        allow_redirects=False,
+    )
+    assert client_module.access_token == "new-access"
+    assert client_module.refresh_token == "rotated-refresh"
+    assert client_module.scope == "movies music"
 
-    assert client_module.refresh_access_token() is False
-    assert client_module.access_token is None
-    assert client_module.refresh_token is None
-    assert client_module.scope is None
 
-
-@pytest.mark.parametrize("failure", ["missing-refresh", "non-2xx", "transport"])
-def test_every_early_refresh_failure_clears_all_state(
-    failure, client_module, requests_post
+@pytest.mark.parametrize(
+    "token_response",
+    [
+        oauth_response(status=400, payload={"error": "invalid_grant"}),
+        oauth_response(
+            status=201,
+            payload={
+                "access_token": "created-access",
+                "refresh_token": "created-refresh",
+            },
+        ),
+        oauth_response(
+            status=302,
+            payload={
+                "access_token": "redirect-access",
+                "refresh_token": "redirect-refresh",
+            },
+        ),
+    ],
+    ids=[
+        "token-endpoint-rejection",
+        "token-endpoint-201",
+        "token-endpoint-redirect",
+    ],
+)
+def test_refresh_failure_clears_unusable_refresh_token(
+    client_module,
+    requests_post,
+    token_response,
 ):
-    client_module.access_token = "old-access"
-    client_module.refresh_token = "old-refresh"
-    client_module.scope = "old-scope"
-    if failure == "missing-refresh":
-        client_module.refresh_token = None
-    elif failure == "non-2xx":
-        requests_post.return_value = oauth_response(
-            status=400, payload={"error": "invalid_grant"}
-        )
-    else:
-        requests_post.side_effect = requests.Timeout("timed out")
-
-    assert client_module.refresh_access_token() is False
-    assert client_module.access_token is None
+    client_module.access_token = "existing-access"
+    client_module.refresh_token = "invalid-refresh"
+    requests_post.return_value = token_response
+    result = client_module.refresh_access_token()
+    assert result is False, "Reject any token-endpoint status other than 200"
+    requests_post.assert_called_once()
+    assert client_module.access_token == "existing-access"
     assert client_module.refresh_token is None
-    assert client_module.scope is None
+
+
+def test_refresh_connection_failure_clears_refresh_token(
+    client_module,
+    requests_post,
+):
+    client_module.access_token = "existing-access"
+    client_module.refresh_token = "refresh-123"
+    requests_post.side_effect = requests.ConnectionError("unavailable")
+    assert client_module.refresh_access_token() is False
+    assert client_module.access_token == "existing-access"
+    assert client_module.refresh_token is None
+
+
+def test_index_renders_token_scope_and_refresh_rows(client_http):
+    response = client_http.get("/")
+    page = response.get_data(as_text=True)
+    assert response.status_code == 200, (
+        "The root client must resolve files/client/index.html "
+        "from the exercise directory"
+    )
+    rows = [
+        "<dt>Access token</dt>",
+        "<dt>Scope</dt>",
+        "<dt>Refresh token</dt>",
+        "<dt>Last refresh</dt>",
+    ]
+    positions = [page.index(row) for row in rows]
+    assert positions == sorted(positions), (
+        "Show access token, scope, refresh token, then last refresh"
+    )
+    assert page.count('class="token value-missing">NONE</span>') == 4, (
+        "Before any authorization every value shows NONE"
+    )
+    assert 'href="/authorize"' in page
+    assert "Authorize movies, foods, and music" in page
+    assert 'href="/favorites"' in page
+    assert "Get the resource owner's favorites" in page
+    assert "Refresh token\n" in refresh_button_markup(page)
+    assert 'class="notice"' not in page
+
+
+def test_home_copy_contract_for_missing_and_present_values(
+    client_module,
+    client_http,
+):
+    client_module.access_token = None
+    client_module.scope = None
+    client_module.refresh_token = "present-refresh"
+    client_module.last_refresh_epoch = None
+    missing = client_http.get("/")
+    missing_markup = b'<span class="token value-missing">NONE</span>'
+    assert missing.status_code == 200
+    assert missing.data.count(missing_markup) == 3, (
+        "Show NONE for the missing access token, scope, and last refresh"
+    )
+    assert missing.data.count(b"data-copy-value") == 1
+    assert missing.data.count(b"data-copy-button") == 1
+
+    client_module.access_token = "present-access"
+    client_module.scope = "movies foods music"
+    client_module.refresh_token = "present-refresh"
+    client_module.last_refresh_epoch = 1_000
+    present = client_http.get("/")
+    for value in (
+        b"present-access",
+        b"movies foods music",
+        b"present-refresh",
+        expected_local_time(1_000).encode(),
+    ):
+        assert value in present.data
+    assert present.data.count(b"data-copy-value") == 3
+    assert present.data.count(b"data-copy-button") == 3
+    assert missing_markup not in present.data
+
+
+def test_common_assets_are_served(client_http):
+    script = client_http.get("/assets/common.js")
+    assert script.status_code == 200
+    assert b"navigator.clipboard.writeText" in script.data
+    styles = client_http.get("/assets/common.css")
+    assert styles.status_code == 200
+    for selector in (b".button-refresh {", b".inline-form {", b".notice {"):
+        assert selector in styles.data

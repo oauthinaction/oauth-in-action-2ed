@@ -13,7 +13,9 @@ TESTS_DIR = Path(__file__).resolve().parent
 
 def load_root_module(name, filename):
     path = (EXERCISE_DIR / filename).resolve()
-    assert path.parent == EXERCISE_DIR.resolve(), f"Tests may load only root exercise modules: {path}"
+    assert path.parent == EXERCISE_DIR.resolve(), (
+        f"Tests may load only root exercise modules: {path}"
+    )
     spec = importlib.util.spec_from_file_location(name, path)
     if spec is None or spec.loader is None:
         raise RuntimeError(f"Unable to load test module from {path}")
@@ -27,8 +29,11 @@ _PREVIOUS_OAUTH_STORE = sys.modules.get("oauth_store")
 STORE = load_root_module("ch4_ex4_root_oauth_store", "oauth_store.py")
 sys.modules["oauth_store"] = STORE
 
-# Any import-time persistence must be disposable, even if a future learner edit adds it.
-_IMPORT_STORE_DIRECTORY = tempfile.TemporaryDirectory(prefix="ch4-ex4-import-")
+# Any import-time persistence must be disposable, even if a future
+# learner edit adds it.
+_IMPORT_STORE_DIRECTORY = tempfile.TemporaryDirectory(
+    prefix="ch4-ex4-import-"
+)
 STORE.DB_PATH = Path(_IMPORT_STORE_DIRECTORY.name) / "oauth.sqlite3"
 
 AUTHORIZATION_SERVER = load_root_module(
@@ -39,7 +44,11 @@ PROTECTED_RESOURCE = load_root_module(
 )
 CLIENT = load_root_module("ch4_ex4_root_client", "client.py")
 
-for flask_app in (CLIENT.app, AUTHORIZATION_SERVER.app, PROTECTED_RESOURCE.app):
+for flask_app in (
+    CLIENT.app,
+    AUTHORIZATION_SERVER.app,
+    PROTECTED_RESOURCE.app,
+):
     flask_app.config.update(TESTING=True)
 
 
@@ -103,15 +112,18 @@ def isolated_runtime(tmp_path, monkeypatch):
     CLIENT.access_token = None
     CLIENT.refresh_token = None
     CLIENT.scope = None
+    CLIENT.last_refresh_epoch = None
 
     guarded_get = Mock(
         side_effect=AssertionError(
-            "Unexpected live requests.get attempt; configure the requests_get fixture"
+            "Unexpected live requests.get attempt; "
+            "configure the requests_get fixture"
         )
     )
     guarded_post = Mock(
         side_effect=AssertionError(
-            "Unexpected live requests.post attempt; configure the requests_post fixture"
+            "Unexpected live requests.post attempt; "
+            "configure the requests_post fixture"
         )
     )
     monkeypatch.setattr(CLIENT.requests, "get", guarded_get)
@@ -125,6 +137,7 @@ def isolated_runtime(tmp_path, monkeypatch):
     CLIENT.access_token = None
     CLIENT.refresh_token = None
     CLIENT.scope = None
+    CLIENT.last_refresh_epoch = None
 
 
 @pytest.fixture

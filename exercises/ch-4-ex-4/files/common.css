@@ -191,6 +191,23 @@ ul.clean {
   background: #e5eaf2;
 }
 
+.button-refresh {
+  color: #fff;
+  background: #2f74c0;
+}
+
+.inline-form {
+  display: contents;
+}
+
+.notice {
+  padding: .75rem 1rem;
+  border-left: .35rem solid #b54708;
+  border-radius: .25rem;
+  color: #172033;
+  background: #fff4e5;
+}
+
 .error {
   border-left: .35rem solid #b42318;
 }
