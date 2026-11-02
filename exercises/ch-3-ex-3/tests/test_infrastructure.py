@@ -737,3 +737,33 @@ def test_approval_page_shows_received_state(
         "Show the state received from the client on the approval page"
     )
     assert expected_markup in markup
+
+
+def test_refresh_grant_prints_the_tokens_it_uses(
+    authorization_http,
+    authorization_server,
+    capsys,
+):
+    fixture = authorization_server.PRECONFIGURED_REFRESH_TOKEN
+    response = token_request(
+        authorization_http,
+        {"grant_type": "refresh_token", "refresh_token": fixture},
+    )
+    payload = response.get_json()
+    console = capsys.readouterr().out
+
+    assert response.status_code == 200
+    assert f"We found a matching refresh token: {fixture}" in console, (
+        "Print the refresh token the client presented"
+    )
+    assert (
+        f"Issuing access token {payload['access_token']} and refresh token "
+        f"{payload['refresh_token']} for refresh token {fixture}"
+    ) in console, "Print the new access and refresh tokens that replace it"
+
+    rejected = token_request(
+        authorization_http,
+        {"grant_type": "refresh_token", "refresh_token": fixture},
+    )
+    assert rejected.status_code == 400
+    assert "No matching token was found." in capsys.readouterr().out

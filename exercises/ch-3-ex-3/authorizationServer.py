@@ -366,8 +366,15 @@ def token() -> tuple[Response, int] | Response:
         except DatabaseError:
             return temporarily_unavailable()
         if rotated_refresh_token is None:
+            print("No matching token was found.")
             return oauth_error("invalid_grant")
 
+        # Teaching shortcut: a real server must never print token values.
+        print(f"We found a matching refresh token: {presented_refresh_token}")
+        print(
+            f"Issuing access token {new_access_token} and refresh token "
+            f"{new_refresh_token} for refresh token {presented_refresh_token}"
+        )
         return jsonify(
             access_token=new_access_token,
             token_type="Bearer",
