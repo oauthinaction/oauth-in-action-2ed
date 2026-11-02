@@ -32,14 +32,25 @@ def database_failure(error_type):
     return fail
 
 
-def test_pkce_helpers_match_rfc_7636_and_reject_invalid_values(authorization_server):
-    assert generate_test_code_challenge(TEST_CODE_VERIFIER) == TEST_CODE_CHALLENGE
-    assert authorization_server.generate_code_challenge(TEST_CODE_VERIFIER) == TEST_CODE_CHALLENGE
-    assert authorization_server.validate_code_challenge(TEST_CODE_CHALLENGE, "S256")
-    assert authorization_server.validate_code_verifier(TEST_CODE_VERIFIER, TEST_CODE_CHALLENGE)
+def test_pkce_helpers_match_rfc_7636_and_reject_invalid_values(
+    authorization_server,
+):
+    server = authorization_server
+    assert (
+        generate_test_code_challenge(TEST_CODE_VERIFIER)
+        == TEST_CODE_CHALLENGE
+    )
+    assert (
+        server.generate_code_challenge(TEST_CODE_VERIFIER)
+        == TEST_CODE_CHALLENGE
+    )
+    assert server.validate_code_challenge(TEST_CODE_CHALLENGE, "S256")
+    assert server.validate_code_verifier(
+        TEST_CODE_VERIFIER, TEST_CODE_CHALLENGE
+    )
 
     for verifier in (None, "short", "a" * 129, "a" * 42 + "!", "é" * 43):
-        assert authorization_server.generate_code_challenge(verifier) is None
+        assert server.generate_code_challenge(verifier) is None
     for challenge, method in (
         (None, "S256"),
         (TEST_CODE_CHALLENGE, None),
@@ -47,13 +58,16 @@ def test_pkce_helpers_match_rfc_7636_and_reject_invalid_values(authorization_ser
         ("invalid=challenge", "S256"),
         ("A" * 42 + "B", "S256"),
     ):
-        assert not authorization_server.validate_code_challenge(challenge, method)
-    assert not authorization_server.validate_code_verifier("x" * 43, TEST_CODE_CHALLENGE)
+        assert not server.validate_code_challenge(challenge, method)
+    assert not server.validate_code_verifier("x" * 43, TEST_CODE_CHALLENGE)
 
 
-def test_authorization_trust_boundary_scope_and_state(authorization_http, authorization_server):
+def test_authorization_trust_boundary_scope_and_state(
+    authorization_http, authorization_server
+):
     unknown = authorization_http.get(
-        "/authorize", query_string={"client_id": "unknown", "redirect_uri": REDIRECT_URI}
+        "/authorize",
+        query_string={"client_id": "unknown", "redirect_uri": REDIRECT_URI},
     )
     bad_redirect = authorization_http.get(
         "/authorize",
@@ -63,15 +77,37 @@ def test_authorization_trust_boundary_scope_and_state(authorization_http, author
         },
     )
     invalid_scope = authorization_http.get(
-        "/authorize", query_string=authorization_query("fruit admin", "scope-state")
+        "/authorize",
+        query_string=authorization_query("fruit admin", "scope-state"),
     )
 
-    assert unknown.status_code == 400 and "Location" not in unknown.headers
-    assert bad_redirect.status_code == 400 and "Location" not in bad_redirect.headers
+    assert unknown.status_code == 400
+    assert "Location" not in unknown.headers
+    assert bad_redirect.status_code == 400
+    assert "Location" not in bad_redirect.headers
     parsed, params = redirect_query(invalid_scope)
     assert parsed.geturl().startswith(REDIRECT_URI + "?")
     assert params == {"error": "invalid_scope", "state": "scope-state"}
     assert not authorization_server.approval_requests
+
+
+def test_approval_page_shows_received_state(
+    authorization_http, authorization_server
+):
+    response = authorization_http.get(
+        "/authorize",
+        query_string=authorization_query(state="visible-state-123"),
+    )
+    page = response.get_data(as_text=True)
+
+    assert response.status_code == 200
+    assert len(authorization_server.approval_requests) == 1
+    assert "<strong>State:</strong>" in page, (
+        "The approval page labels the state it received"
+    )
+    assert "<code data-copy-value>visible-state-123</code>" in page, (
+        "The approval page shows the received state value"
+    )
 
 
 @pytest.mark.parametrize(
@@ -105,7 +141,11 @@ def test_invalid_pkce_redirects_only_to_registered_callback(
 @pytest.mark.parametrize(
     ("requested", "granted", "expected"),
     [
-        ("fruit veggies meats", "fruit veggies meats", ["fruit", "veggies", "meats"]),
+        (
+            "fruit veggies meats",
+            "fruit veggies meats",
+            ["fruit", "veggies", "meats"],
+        ),
         ("fruit veggies meats", "fruit meats", ["fruit", "meats"]),
         ("fruit veggies meats", "", []),
         ("veggies", "veggies", ["veggies"]),
@@ -122,10 +162,11 @@ def test_approval_grants_only_selected_requested_scope(
         state="consent-state",
     )
     assert params["state"] == "consent-state"
-    assert authorization_server.authorization_codes[code]["scope"] == expected
+    issued_code = authorization_server.authorization_codes[code]
+    assert issued_code["scope"] == expected
 
 
-def test_approval_is_one_use_and_rejects_denial_response_type_and_scope_tampering(
+def test_approval_is_one_use_and_rejects_denial_type_and_scope_tampering(
     authorization_http, authorization_server
 ):
     def pending(query):
@@ -137,7 +178,8 @@ def test_approval_is_one_use_and_rejects_denial_response_type_and_scope_tamperin
     denied = authorization_http.post("/approve", data={"reqid": request_id})
     _, params = redirect_query(denied)
     assert params == {"error": "access_denied", "state": "deny-state"}
-    assert authorization_http.post("/approve", data={"reqid": request_id}).status_code == 400
+    replayed = authorization_http.post("/approve", data={"reqid": request_id})
+    assert replayed.status_code == 400
 
     unsupported_query = authorization_query(state="type-state")
     unsupported_query["response_type"] = "token"
@@ -153,7 +195,11 @@ def test_approval_is_one_use_and_rejects_denial_response_type_and_scope_tamperin
     request_id = pending(authorization_query("fruit", "tamper-state"))
     tampered = authorization_http.post(
         "/approve",
-        data={"reqid": request_id, "approve": "Approve", "scope_admin": "admin"},
+        data={
+            "reqid": request_id,
+            "approve": "Approve",
+            "scope_admin": "admin",
+        },
     )
     assert redirect_query(tampered)[1] == {
         "error": "invalid_scope",
@@ -161,17 +207,28 @@ def test_approval_is_one_use_and_rejects_denial_response_type_and_scope_tamperin
     }
 
 
-def test_token_endpoint_requires_one_valid_client_authentication_method(authorization_http):
+def test_token_endpoint_requires_one_valid_client_authentication_method(
+    authorization_http,
+):
     valid_headers = oauth_form_headers()
     attempts = (
         ({"Authorization": "Basic !!!"}, {}),
         (oauth_form_headers(CLIENT_ID, "wrong-secret"), {}),
-        (valid_headers, {"client_id": CLIENT_ID, "client_secret": CLIENT_SECRET}),
+        (
+            valid_headers,
+            {"client_id": CLIENT_ID, "client_secret": CLIENT_SECRET},
+        ),
         ({}, {}),
     )
     for headers, extra in attempts:
-        data = {"grant_type": "refresh_token", "refresh_token": "unknown", **extra}
-        response = authorization_http.post("/token", data=data, headers=headers)
+        data = {
+            "grant_type": "refresh_token",
+            "refresh_token": "unknown",
+            **extra,
+        }
+        response = authorization_http.post(
+            "/token", data=data, headers=headers
+        )
         assert response.status_code == 401
         assert response.get_json() == {"error": "invalid_client"}
         assert response.headers["WWW-Authenticate"] == 'Basic realm="token"'
@@ -189,7 +246,7 @@ def test_token_endpoint_requires_one_valid_client_authentication_method(authoriz
     assert json_request.get_json() == {"error": "invalid_request"}
 
 
-def test_code_grant_issues_persisted_access_refresh_pair_and_rejects_replay(
+def test_code_grant_issues_persisted_token_pair_and_rejects_replay(
     authorization_http, authorization_server, oauth_store
 ):
     code, _ = issue_authorization_code(
@@ -201,7 +258,12 @@ def test_code_grant_issues_persisted_access_refresh_pair_and_rejects_replay(
     payload = response.get_json()
 
     assert response.status_code == 200
-    assert set(payload) == {"access_token", "token_type", "refresh_token", "scope"}
+    assert set(payload) == {
+        "access_token",
+        "token_type",
+        "refresh_token",
+        "scope",
+    }
     assert payload["token_type"] == "Bearer"
     assert payload["scope"] == "fruit meats"
     assert oauth_store.find_access_token(payload["access_token"]) == {
@@ -222,7 +284,9 @@ def test_code_grant_issues_persisted_access_refresh_pair_and_rejects_replay(
 def test_concurrent_code_redemption_issues_exactly_one_token_pair(
     authorization_http, authorization_server, oauth_store, monkeypatch
 ):
-    code, _ = issue_authorization_code(authorization_http, authorization_server)
+    code, _ = issue_authorization_code(
+        authorization_http, authorization_server
+    )
     real_issue_token_pair = authorization_server.issue_token_pair
     first_issue_started = Event()
     release_first_issue = Event()
@@ -263,15 +327,24 @@ def test_concurrent_code_redemption_issues_exactly_one_token_pair(
             assert second_request_started.wait(timeout=5)
         finally:
             release_first_issue.set()
-        results = [first_result.result(timeout=5), second_result.result(timeout=5)]
+        results = [
+            first_result.result(timeout=5),
+            second_result.result(timeout=5),
+        ]
 
     assert sorted(status for status, _body in results) == [200, 400]
     success_body = next(body for status, body in results if status == 200)
     failure_body = next(body for status, body in results if status == 400)
     assert failure_body == {"error": "invalid_grant"}
     assert len(issue_calls) == 1
-    assert oauth_store.find_access_token(success_body["access_token"]) is not None
-    assert oauth_store.find_refresh_token(success_body["refresh_token"]) is not None
+    assert (
+        oauth_store.find_access_token(success_body["access_token"])
+        is not None
+    )
+    assert (
+        oauth_store.find_refresh_token(success_body["refresh_token"])
+        is not None
+    )
     with oauth_store._connect() as connection:
         access_count = connection.execute(
             "SELECT COUNT(*) FROM access_tokens"
@@ -286,12 +359,18 @@ def test_concurrent_code_redemption_issues_exactly_one_token_pair(
 def test_redirect_and_pkce_failures_preserve_code_until_valid_exchange(
     authorization_http, authorization_server
 ):
-    code, _ = issue_authorization_code(authorization_http, authorization_server)
+    code, _ = issue_authorization_code(
+        authorization_http, authorization_server
+    )
     wrong_redirect = redeem_code(
         authorization_http, code, redirect_uri="https://wrong.invalid/callback"
     )
-    missing_verifier = redeem_code(authorization_http, code, code_verifier=None)
-    wrong_verifier = redeem_code(authorization_http, code, code_verifier="x" * 43)
+    missing_verifier = redeem_code(
+        authorization_http, code, code_verifier=None
+    )
+    wrong_verifier = redeem_code(
+        authorization_http, code, code_verifier="x" * 43
+    )
     accepted = redeem_code(authorization_http, code)
 
     for response in (wrong_redirect, missing_verifier, wrong_verifier):
@@ -300,11 +379,13 @@ def test_redirect_and_pkce_failures_preserve_code_until_valid_exchange(
     assert accepted.status_code == 200
 
 
-def test_refresh_rotation_preserves_scope_and_rejects_replay_and_wrong_binding(
+def test_refresh_rotation_preserves_scope_and_rejects_replay_and_binding(
     authorization_http, authorization_server, oauth_store
 ):
     code, _ = issue_authorization_code(
-        authorization_http, authorization_server, granted_scope="veggies meats"
+        authorization_http,
+        authorization_server,
+        granted_scope="veggies meats",
     )
     issued = redeem_code(authorization_http, code).get_json()
     old_access = issued["access_token"]
@@ -320,35 +401,49 @@ def test_refresh_rotation_preserves_scope_and_rejects_replay_and_wrong_binding(
     assert first_body["access_token"] != old_access
     assert first_body["refresh_token"] != old_refresh
     assert oauth_store.find_refresh_token(old_refresh) is None
-    assert oauth_store.find_refresh_token(first_body["refresh_token"])["scope"] == "veggies meats"
+    rotated_record = oauth_store.find_refresh_token(
+        first_body["refresh_token"]
+    )
+    assert rotated_record["scope"] == "veggies meats"
     assert oauth_store.find_access_token(old_access) is not None
 
     replay = token_request(
         authorization_http,
         {"grant_type": "refresh_token", "refresh_token": old_refresh},
     )
-    assert replay.status_code == 400 and replay.get_json() == {"error": "invalid_grant"}
+    assert replay.status_code == 400
+    assert replay.get_json() == {"error": "invalid_grant"}
 
-    oauth_store.insert_refresh_token("other-client-refresh", "other-client", "fruit")
+    oauth_store.insert_refresh_token(
+        "other-client-refresh", "other-client", "fruit"
+    )
     wrong_binding = token_request(
         authorization_http,
-        {"grant_type": "refresh_token", "refresh_token": "other-client-refresh"},
+        {
+            "grant_type": "refresh_token",
+            "refresh_token": "other-client-refresh",
+        },
     )
     assert wrong_binding.status_code == 400
     assert oauth_store.find_refresh_token("other-client-refresh") is not None
 
     second = token_request(
         authorization_http,
-        {"grant_type": "refresh_token", "refresh_token": first_body["refresh_token"]},
+        {
+            "grant_type": "refresh_token",
+            "refresh_token": first_body["refresh_token"],
+        },
     )
     assert second.status_code == 200
     assert second.get_json()["scope"] == "veggies meats"
 
 
-def test_code_and_refresh_database_errors_return_503_without_consuming_grants(
+def test_code_and_refresh_database_errors_return_503_without_consuming(
     authorization_http, authorization_server, oauth_store, monkeypatch
 ):
-    code, _ = issue_authorization_code(authorization_http, authorization_server)
+    code, _ = issue_authorization_code(
+        authorization_http, authorization_server
+    )
     real_issue = authorization_server.issue_token_pair
     monkeypatch.setattr(
         authorization_server,
@@ -381,11 +476,17 @@ def test_code_and_refresh_database_errors_return_503_without_consuming_grants(
 def test_refresh_rotation_collision_rolls_back_all_changes(
     authorization_http, authorization_server, oauth_store, monkeypatch
 ):
-    oauth_store.insert_refresh_token("original-refresh", CLIENT_ID, "fruit veggies")
-    oauth_store.insert_refresh_token("collision-refresh", "other-client", "other")
+    oauth_store.insert_refresh_token(
+        "original-refresh", CLIENT_ID, "fruit veggies"
+    )
+    oauth_store.insert_refresh_token(
+        "collision-refresh", "other-client", "other"
+    )
     values = iter(["candidate-access", "collision-refresh"])
     monkeypatch.setattr(
-        authorization_server.secrets, "token_urlsafe", lambda _size: next(values)
+        authorization_server.secrets,
+        "token_urlsafe",
+        lambda _size: next(values),
     )
 
     response = token_request(
@@ -399,4 +500,5 @@ def test_refresh_rotation_collision_rolls_back_all_changes(
         "scope": "fruit veggies",
     }
     assert oauth_store.find_access_token("candidate-access") is None
-    assert oauth_store.find_refresh_token("collision-refresh")["client_id"] == "other-client"
+    collision_record = oauth_store.find_refresh_token("collision-refresh")
+    assert collision_record["client_id"] == "other-client"

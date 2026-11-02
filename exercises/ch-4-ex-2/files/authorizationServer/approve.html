@@ -31,6 +31,20 @@
           </button>
         </span>
       </p>
+      <p>
+        <strong>State:</strong>
+        {% if state %}
+          <span class="copyable-inline" data-copy-container>
+            <code data-copy-value>{{ state }}</code>
+            <button class="copy-button" type="button" data-copy-button
+              aria-label="Copy state" title="Copy state">
+              <span class="copy-icon" aria-hidden="true"></span>
+            </button>
+          </span>
+        {% else %}
+          <span class="token value-missing">NONE</span>
+        {% endif %}
+      </p>
       {% if client.client_uri %}
         <p>
           <strong>URI:</strong>

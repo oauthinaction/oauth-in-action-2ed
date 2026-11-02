@@ -5,7 +5,12 @@ from pathlib import Path
 
 from flask import Flask, Response, jsonify, render_template, request
 
-from oauth_store import AccessToken, DatabaseError, find_access_token, initialize_schema
+from oauth_store import (
+    AccessToken,
+    DatabaseError,
+    find_access_token,
+    initialize_schema,
+)
 
 
 BASE_DIR = Path(__file__).resolve().parent
@@ -52,7 +57,7 @@ UNKNOWN_FAVORITES = {
 
 
 def incoming_access_token() -> str | None:
-    """Read a strict Bearer token, or a form token when the header is absent."""
+    """Read a strict Bearer token, or a form token if there is no header."""
     # HTTP field names are case-insensitive. Werkzeug's header mapping handles
     # that lookup while preserving the case-sensitive credential value.
     authorization = request.headers.get("Authorization")

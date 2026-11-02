@@ -28,9 +28,10 @@ def oauth_response(status=200, payload=None, raw_body=None):
     response.status_code = status
     response.url = "https://test.invalid/oauth"
     response.headers["Content-Type"] = "application/json"
-    response._content = (
-        raw_body if raw_body is not None else json.dumps(payload).encode("utf-8")
-    )
+    if raw_body is not None:
+        response._content = raw_body
+    else:
+        response._content = json.dumps(payload).encode("utf-8")
     return response
 
 

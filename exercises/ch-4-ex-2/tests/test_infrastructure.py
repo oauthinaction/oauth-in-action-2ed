@@ -44,13 +44,21 @@ def test_outbound_get_post_delete_are_fail_closed(
     requests_post,
     requests_delete,
 ):
-    with pytest.raises(AssertionError, match=r"Unexpected live requests\.get"):
+    with pytest.raises(
+        AssertionError, match=r"Unexpected live requests\.get"
+    ):
         client_module.requests.get("https://example.invalid")
-    with pytest.raises(AssertionError, match=r"Unexpected live requests\.post"):
+    with pytest.raises(
+        AssertionError, match=r"Unexpected live requests\.post"
+    ):
         client_module.requests.post("https://example.invalid")
-    with pytest.raises(AssertionError, match=r"Unexpected live requests\.delete"):
+    with pytest.raises(
+        AssertionError, match=r"Unexpected live requests\.delete"
+    ):
         client_module.requests.delete("https://example.invalid")
-    assert requests_get.call_count == requests_post.call_count == requests_delete.call_count == 1
+    assert requests_get.call_count == 1
+    assert requests_post.call_count == 1
+    assert requests_delete.call_count == 1
 
 
 def test_words_actions_use_read_and_write_colors(client_http):

@@ -31,7 +31,9 @@ def seed_code(authorization_server, code="code-1", verifier=VERIFIER):
         "client_id": CLIENT_ID,
         "redirect_uri": REDIRECT_URI,
         "scope": [],
-        "code_challenge": authorization_server.generate_code_challenge(verifier),
+        "code_challenge": authorization_server.generate_code_challenge(
+            verifier
+        ),
         "code_challenge_method": "S256",
     }
 
@@ -61,13 +63,54 @@ def test_authorize_accepts_omitted_empty_scope_and_valid_s256_pkce(
     assert saved["code_challenge"] == challenge
 
 
-def test_authorization_code_exchange_consumes_code_and_persists_both_tokens_atomically(
+@pytest.mark.parametrize(
+    "state",
+    ["received-state-123", None],
+    ids=["state-sent", "state-absent"],
+)
+def test_approval_page_shows_received_state(
+    state, authorization_http, authorization_server
+):
+    query = {
+        "response_type": "code",
+        "client_id": CLIENT_ID,
+        "redirect_uri": REDIRECT_URI,
+        "code_challenge": authorization_server.generate_code_challenge(
+            VERIFIER
+        ),
+        "code_challenge_method": "S256",
+    }
+    if state is not None:
+        query["state"] = state
+
+    response = authorization_http.get("/authorize", query_string=query)
+    page = response.get_data(as_text=True)
+    state_start = page.index("<strong>State:</strong>")
+    state_markup = page[state_start:page.index("</p>", state_start)]
+
+    assert response.status_code == 200
+    if state is not None:
+        assert f"<code data-copy-value>{state}</code>" in state_markup, (
+            "Show the state the client sent on the approval page"
+        )
+        assert 'aria-label="Copy state"' in state_markup
+        assert "value-missing" not in state_markup
+    else:
+        assert (
+            '<span class="token value-missing">NONE</span>' in state_markup
+        ), "Show a red NONE when the client sent no state"
+        assert "data-copy-value" not in state_markup
+
+
+def test_code_exchange_consumes_code_and_persists_both_tokens_atomically(
     authorization_http, authorization_server, oauth_store
 ):
     seed_code(authorization_server)
 
     response = authorization_http.post(
-        "/token", data=token_form(), headers=basic_header(CLIENT_ID, CLIENT_SECRET)
+        "/token",
+        data=token_form(),
+        headers=basic_header(CLIENT_ID, CLIENT_SECRET),
     )
 
     assert response.status_code == 200
@@ -97,7 +140,11 @@ def test_authorization_code_exchange_consumes_code_and_persists_both_tokens_atom
     ],
 )
 def test_invalid_redirect_or_pkce_rejects_grant_without_consuming_code(
-    change, expected_status, authorization_http, authorization_server, oauth_store
+    change,
+    expected_status,
+    authorization_http,
+    authorization_server,
+    oauth_store,
 ):
     seed_code(authorization_server)
 
@@ -127,7 +174,9 @@ def test_wrong_or_ambiguous_client_authentication_is_a_challenged_401(
     ]
 
     for headers, form in cases:
-        response = authorization_http.post("/token", data=form, headers=headers)
+        response = authorization_http.post(
+            "/token", data=form, headers=headers
+        )
         assert response.status_code == 401
         assert response.get_json() == {"error": "invalid_client"}
         assert response.headers["WWW-Authenticate"] == 'Basic realm="token"'
@@ -166,18 +215,26 @@ def test_token_database_errors_map_to_retryable_503(
         raise oauth_store.DatabaseError("database unavailable")
 
     original_issue = authorization_server.issue_token_pair
-    monkeypatch.setattr(authorization_server, "issue_token_pair", database_failure)
+    monkeypatch.setattr(
+        authorization_server, "issue_token_pair", database_failure
+    )
     code_response = authorization_http.post(
-        "/token", data=token_form(), headers=basic_header(CLIENT_ID, CLIENT_SECRET)
+        "/token",
+        data=token_form(),
+        headers=basic_header(CLIENT_ID, CLIENT_SECRET),
     )
     assert code_response.status_code == 503
     assert code_response.get_json() == {"error": "temporarily_unavailable"}
     assert code_response.headers["Retry-After"] == "1"
     assert "code-1" in authorization_server.authorization_codes
 
-    monkeypatch.setattr(authorization_server, "issue_token_pair", original_issue)
+    monkeypatch.setattr(
+        authorization_server, "issue_token_pair", original_issue
+    )
     oauth_store.insert_refresh_token("refresh-1", CLIENT_ID, "")
-    monkeypatch.setattr(authorization_server, "rotate_refresh_token", database_failure)
+    monkeypatch.setattr(
+        authorization_server, "rotate_refresh_token", database_failure
+    )
     refresh_response = authorization_http.post(
         "/token",
         data={"grant_type": "refresh_token", "refresh_token": "refresh-1"},
@@ -276,7 +333,9 @@ def test_concurrent_code_redemption_issues_exactly_one_persisted_pair(
         assert release_first_issue.wait(timeout=5)
         return original_issue(*args, **kwargs)
 
-    monkeypatch.setattr(authorization_server, "issue_token_pair", controlled_issue)
+    monkeypatch.setattr(
+        authorization_server, "issue_token_pair", controlled_issue
+    )
     start_barrier = Barrier(3)
 
     def redeem_code():
@@ -304,8 +363,10 @@ def test_concurrent_code_redemption_issues_exactly_one_persisted_pair(
     ]
 
     successful_body = next(body for status, body in outcomes if status == 200)
-    assert oauth_store.find_access_token(successful_body["access_token"]) is not None
-    assert oauth_store.find_refresh_token(successful_body["refresh_token"]) is not None
+    issued_access_token = successful_body["access_token"]
+    issued_refresh_token = successful_body["refresh_token"]
+    assert oauth_store.find_access_token(issued_access_token) is not None
+    assert oauth_store.find_refresh_token(issued_refresh_token) is not None
     with oauth_store._connect() as connection:
         access_count = connection.execute(
             "SELECT COUNT(*) FROM access_tokens"

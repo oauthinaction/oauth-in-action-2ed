@@ -9,9 +9,16 @@ EXERCISE_DIR = BASE_DIR.parent if BASE_DIR.name == "completed" else BASE_DIR
 if str(EXERCISE_DIR) not in sys.path:
     sys.path.insert(0, str(EXERCISE_DIR))
 
-from flask import Flask, Response, jsonify, render_template, request
+# These imports must come after the sys.path setup above.
+from flask import (  # noqa: E402
+    Flask,
+    Response,
+    jsonify,
+    render_template,
+    request,
+)
 
-from oauth_store import (
+from oauth_store import (  # noqa: E402
     AccessToken,
     DatabaseError,
     find_access_token,
@@ -37,7 +44,7 @@ OAuthError = tuple[Response, int]
 
 
 def incoming_access_token() -> str | None:
-    """Read a strict Bearer token, or a form token when the header is absent."""
+    """Read a strict Bearer token, or a form token when there is no header."""
     # HTTP field names are case-insensitive. Werkzeug's header mapping handles
     # that lookup while preserving the case-sensitive credential value.
     authorization = request.headers.get("Authorization")

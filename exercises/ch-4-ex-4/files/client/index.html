@@ -59,7 +59,18 @@
             </span>
           {% else %}<span class="token value-missing">NONE</span>{% endif %}
         </dd>
+        <dt>Last refresh</dt>
+        <dd>
+          {% if last_refresh_time %}
+            <span class="token">{{ last_refresh_time }}</span>
+          {% else %}
+            <span class="token value-missing">NONE</span>
+          {% endif %}
+        </dd>
       </dl>
+      {% if notice %}
+        <p class="notice" role="status">{{ notice }}</p>
+      {% endif %}
       <div class="actions">
         <a class="button button-primary" href="/authorize">
           Authorize movies, foods, and music
@@ -67,6 +78,11 @@
         <a class="button button-secondary" href="/favorites">
           Get the resource owner's favorites
         </a>
+        <form class="inline-form" action="/refresh" method="post">
+          <button class="button button-refresh" type="submit">
+            Refresh token
+          </button>
+        </form>
       </div>
     </section>
   </main>

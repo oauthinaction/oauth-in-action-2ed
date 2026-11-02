@@ -10,7 +10,13 @@ from pathlib import Path
 import secrets
 from threading import Lock
 from typing import Any, TypedDict
-from urllib.parse import parse_qsl, unquote_plus, urlencode, urlsplit, urlunsplit
+from urllib.parse import (
+    parse_qsl,
+    unquote_plus,
+    urlencode,
+    urlsplit,
+    urlunsplit,
+)
 
 from flask import Flask, Response, jsonify, redirect, render_template, request
 
@@ -37,7 +43,7 @@ CLIENTS = [
     {
         "client_id": "oauth-client-1",
         "client_secret": "oauth-client-secret-1",
-        "redirect_uris": ["http://localhost:9000/callback"],
+        "redirect_uris": "http://localhost:9000/callback",
         "scope": "fruit veggies meats",
     }
 ]
@@ -68,14 +74,20 @@ authorization_code_lock = Lock()
 
 
 def build_url(base: str, parameters: dict[str, str | None]) -> str:
-    """Add query parameters without discarding parameters already in the URL."""
+    """Add query parameters without discarding parameters already in a URL."""
     parts = urlsplit(base)
     query = dict(parse_qsl(parts.query, keep_blank_values=True))
     query.update(
         {key: value for key, value in parameters.items() if value is not None}
     )
     return urlunsplit(
-        (parts.scheme, parts.netloc, parts.path, urlencode(query), parts.fragment)
+        (
+            parts.scheme,
+            parts.netloc,
+            parts.path,
+            urlencode(query),
+            parts.fragment,
+        )
     )
 
 
@@ -104,7 +116,9 @@ def request_data() -> dict[str, Any]:
     return request.form.to_dict()
 
 
-def basic_credentials(header: str | None) -> tuple[tuple[str, str] | None, bool]:
+def basic_credentials(
+    header: str | None,
+) -> tuple[tuple[str, str] | None, bool]:
     """Decode OAuth Basic credentials, including OAuth percent decoding."""
     if header is None:
         return None, False
@@ -127,7 +141,10 @@ def generate_code_challenge(code_verifier: str) -> str | None:
         return None
     if not 43 <= len(code_verifier) <= 128:
         return None
-    if any(character not in PKCE_VERIFIER_CHARACTERS for character in code_verifier):
+    if any(
+        character not in PKCE_VERIFIER_CHARACTERS
+        for character in code_verifier
+    ):
         return None
     try:
         ascii_verifier = code_verifier.encode("ascii")
@@ -192,7 +209,9 @@ def redirect_error(callback: str, error: str, state: str | None) -> Response:
 
 @app.get("/")
 def index() -> str:
-    return render_template("index.html", clients=CLIENTS, auth_server=AUTH_SERVER)
+    return render_template(
+        "index.html", clients=CLIENTS, auth_server=AUTH_SERVER
+    )
 
 
 @app.get("/authorize")
@@ -202,7 +221,7 @@ def authorize() -> Response | str:
         return render_template("error.html", error="Unknown client"), 400
 
     redirect_uri = request.args.get("redirect_uri")
-    if redirect_uri not in client["redirect_uris"]:
+    if redirect_uri != client["redirect_uris"]:
         return render_template("error.html", error="Invalid redirect URI"), 400
 
     requested_scope = request.args.get("scope", "").split()
@@ -225,8 +244,13 @@ def authorize() -> Response | str:
 
     request_id = secrets.token_urlsafe(18)
     approval_requests[request_id] = request.args.to_dict()
+    received_state = request.args.get("state")
     return render_template(
-        "approve.html", client=client, reqid=request_id, scope=requested_scope
+        "approve.html",
+        client=client,
+        reqid=request_id,
+        scope=requested_scope,
+        state=received_state,
     )
 
 

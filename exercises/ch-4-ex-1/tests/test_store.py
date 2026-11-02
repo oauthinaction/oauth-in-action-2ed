@@ -2,7 +2,9 @@ import pytest
 
 
 def test_token_pair_insert_is_atomic_when_refresh_insert_fails(oauth_store):
-    oauth_store.insert_refresh_token("duplicate-refresh", "existing-client", "old")
+    oauth_store.insert_refresh_token(
+        "duplicate-refresh", "existing-client", "old"
+    )
 
     with pytest.raises(oauth_store.DatabaseError):
         oauth_store.issue_token_pair(
@@ -20,7 +22,9 @@ def test_token_pair_insert_is_atomic_when_refresh_insert_fails(oauth_store):
     }
 
 
-def test_refresh_rotation_is_client_bound_atomic_and_preserves_scope(oauth_store):
+def test_refresh_rotation_is_client_bound_atomic_and_preserves_scope(
+    oauth_store,
+):
     oauth_store.issue_token_pair(
         "access-1", "refresh-1", "oauth-client-1", "read write"
     )
@@ -46,7 +50,9 @@ def test_refresh_rotation_is_client_bound_atomic_and_preserves_scope(oauth_store
     assert oauth_store.find_access_token("access-1") is not None
 
 
-def test_refresh_rotation_rolls_back_consumption_on_replacement_collision(oauth_store):
+def test_refresh_rotation_rolls_back_consumption_on_replacement_collision(
+    oauth_store,
+):
     oauth_store.issue_token_pair("access-1", "refresh-1", "oauth-client-1", "")
     oauth_store.insert_access_token("duplicate-access", "another-client", "")
 

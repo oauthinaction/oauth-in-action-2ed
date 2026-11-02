@@ -32,6 +32,31 @@ def test_approval_page_exposes_only_fixture_users_and_warning(
     assert "must not be used as a production pattern" in html
 
 
+def test_approval_page_shows_the_received_state(
+    authorization_http, authorization_server
+):
+    _, response = begin_authorization(
+        authorization_http, authorization_server, state="shown-state-123"
+    )
+    html = response.get_data(as_text=True)
+    assert "<strong>State:</strong>" in html
+    assert "<code data-copy-value>shown-state-123</code>" in html, (
+        "Show the state value the client sent on the approval page"
+    )
+
+    authorization_server.approval_requests.clear()
+    _, stateless = begin_authorization(
+        authorization_http, authorization_server, state=None
+    )
+    stateless_html = stateless.get_data(as_text=True)
+    state_row_start = stateless_html.index("<strong>State:</strong>")
+    state_row_end = stateless_html.index("</p>", state_row_start)
+    state_row = stateless_html[state_row_start:state_row_end]
+    assert 'class="token value-missing">NONE</span>' in state_row, (
+        "Show NONE when the authorization request carried no state"
+    )
+
+
 def test_authorize_enforces_client_redirect_scope_pkce_and_preserves_state(
     authorization_http, authorization_server
 ):
@@ -42,9 +67,8 @@ def test_authorize_enforces_client_redirect_scope_pkce_and_preserves_state(
         ({"code_challenge": TEST_CODE_CHALLENGE + "="}, "invalid_request"),
     ]
     for updates, expected_error in bad_requests:
-        response = authorization_http.get(
-            "/authorize", query_string=authorization_query(state="kept-state", **updates)
-        )
+        query = authorization_query(state="kept-state", **updates)
+        response = authorization_http.get("/authorize", query_string=query)
         parsed, parameters = redirect_parameters(response)
         assert response.status_code == 302
         assert parsed.geturl().startswith(CALLBACK)
@@ -56,13 +80,19 @@ def test_authorize_enforces_client_redirect_scope_pkce_and_preserves_state(
     )
     bad_redirect = authorization_http.get(
         "/authorize",
-        query_string=authorization_query(redirect_uri="https://evil.invalid/callback"),
+        query_string=authorization_query(
+            redirect_uri="https://evil.invalid/callback"
+        ),
     )
-    assert unknown.status_code == 400 and "Location" not in unknown.headers
-    assert bad_redirect.status_code == 400 and "Location" not in bad_redirect.headers
+    assert unknown.status_code == 400
+    assert "Location" not in unknown.headers
+    assert bad_redirect.status_code == 400
+    assert "Location" not in bad_redirect.headers
 
 
-@pytest.mark.parametrize("submitted_owner", [None, "", "mallory", "Alice", "BOB"])
+@pytest.mark.parametrize(
+    "submitted_owner", [None, "", "mallory", "Alice", "BOB"]
+)
 def test_missing_or_invalid_owner_uses_trusted_callback_and_preserves_state(
     submitted_owner, authorization_http, authorization_server
 ):
@@ -103,11 +133,17 @@ def test_approval_binds_exact_owner_and_granted_scope_to_code_and_pair(
     response = redeem_code(
         authorization_http,
         code,
-        resource_owner="alice",  # Token-request owner injection is untrusted input.
+        # Token-request owner injection is untrusted input.
+        resource_owner="alice",
     )
     assert response.status_code == 200
     body = response.get_json()
-    assert set(body) == {"access_token", "refresh_token", "token_type", "scope"}
+    assert set(body) == {
+        "access_token",
+        "refresh_token",
+        "token_type",
+        "scope",
+    }
     assert body["token_type"] == "Bearer"
     assert body["scope"] == "movies music"
     assert oauth_store.find_access_token(body["access_token"]) == {
@@ -116,7 +152,8 @@ def test_approval_binds_exact_owner_and_granted_scope_to_code_and_pair(
         "scope": "movies music",
         "resource_owner": "bob",
     }
-    assert oauth_store.find_refresh_token(body["refresh_token"])["resource_owner"] == "bob"
+    refresh_record = oauth_store.find_refresh_token(body["refresh_token"])
+    assert refresh_record["resource_owner"] == "bob"
 
 
 def test_code_grant_requires_pkce_exact_redirect_and_is_single_use(
@@ -177,17 +214,22 @@ def test_token_endpoint_requires_one_valid_basic_authentication_method(
         ({}, form),
         ({"Authorization": "Basic !!!"}, form),
         (basic_headers(client_secret="wrong"), form),
-        (basic_headers(), {**form, "client_id": CLIENT_ID, "client_secret": "x"}),
+        (
+            basic_headers(),
+            {**form, "client_id": CLIENT_ID, "client_secret": "x"},
+        ),
     ]
     for headers, data in cases:
-        response = authorization_http.post("/token", data=data, headers=headers)
+        response = authorization_http.post(
+            "/token", data=data, headers=headers
+        )
         assert response.status_code == 401
         assert response.get_json() == {"error": "invalid_client"}
         assert response.headers["WWW-Authenticate"] == 'Basic realm="token"'
     assert code in authorization_server.authorization_codes
 
 
-def test_refresh_grant_preserves_scope_and_owner_ignores_injection_and_rejects_replay(
+def test_refresh_keeps_scope_owner_ignores_injection_rejects_replay(
     authorization_http, oauth_store
 ):
     oauth_store.issue_token_pair(
@@ -199,15 +241,21 @@ def test_refresh_grant_preserves_scope_and_owner_ignores_injection_and_rejects_r
         "resource_owner": "bob",
         "scope": "foods",
     }
-    response = authorization_http.post("/token", data=data, headers=basic_headers())
+    response = authorization_http.post(
+        "/token", data=data, headers=basic_headers()
+    )
     assert response.status_code == 200
     body = response.get_json()
     assert body["scope"] == "music movies"
     assert oauth_store.find_refresh_token("old-refresh") is None
-    assert oauth_store.find_access_token(body["access_token"])["resource_owner"] == "alice"
-    assert oauth_store.find_refresh_token(body["refresh_token"])["resource_owner"] == "alice"
+    access_record = oauth_store.find_access_token(body["access_token"])
+    refresh_record = oauth_store.find_refresh_token(body["refresh_token"])
+    assert access_record["resource_owner"] == "alice"
+    assert refresh_record["resource_owner"] == "alice"
 
-    replay = authorization_http.post("/token", data=data, headers=basic_headers())
+    replay = authorization_http.post(
+        "/token", data=data, headers=basic_headers()
+    )
     assert replay.status_code == 400
     assert replay.get_json() == {"error": "invalid_grant"}
 
@@ -281,7 +329,9 @@ def test_concurrent_code_redemption_issues_exactly_one_owner_bound_pair(
 
     observed_lock = ObservedLock()
     monkeypatch.setattr(
-        authorization_server, "authorization_code_redemption_lock", observed_lock
+        authorization_server,
+        "authorization_code_redemption_lock",
+        observed_lock,
     )
 
     original_issue_token_pair = authorization_server.issue_token_pair
@@ -294,7 +344,9 @@ def test_concurrent_code_redemption_issues_exactly_one_owner_bound_pair(
         assert release_first_redemption.wait(timeout=5)
 
     monkeypatch.setattr(
-        authorization_server, "issue_token_pair", pause_after_first_pair_is_persisted
+        authorization_server,
+        "issue_token_pair",
+        pause_after_first_pair_is_persisted,
     )
 
     def redeem_in_separate_client():
@@ -318,10 +370,12 @@ def test_concurrent_code_redemption_issues_exactly_one_owner_bound_pair(
 
     with oauth_store._connect() as connection:
         access_rows = connection.execute(
-            "SELECT access_token, client_id, scope, resource_owner FROM access_tokens"
+            "SELECT access_token, client_id, scope, resource_owner "
+            "FROM access_tokens"
         ).fetchall()
         refresh_rows = connection.execute(
-            "SELECT refresh_token, client_id, scope, resource_owner FROM refresh_tokens"
+            "SELECT refresh_token, client_id, scope, resource_owner "
+            "FROM refresh_tokens"
         ).fetchall()
 
     assert [dict(row) for row in access_rows] == [

@@ -9,7 +9,6 @@ from helpers import (
     CLIENT_SECRET,
     REDIRECT_URI,
     TEST_CODE_CHALLENGE,
-    TEST_CODE_VERIFIER,
     exchange_code_form,
     issue_authorization_code,
     oauth_form_headers,
@@ -31,7 +30,9 @@ def authorization_query(**overrides):
     return query
 
 
-def test_authorize_rejects_unknown_client_without_redirect(authorization_http):
+def test_authorize_rejects_unknown_client_without_redirect(
+    authorization_http,
+):
     response = authorization_http.get(
         "/authorize", query_string=authorization_query(client_id="unknown")
     )
@@ -40,10 +41,14 @@ def test_authorize_rejects_unknown_client_without_redirect(authorization_http):
     assert b"Unknown client" in response.data
 
 
-def test_authorize_rejects_unregistered_redirect_without_redirect(authorization_http):
+def test_authorize_rejects_unregistered_redirect_without_redirect(
+    authorization_http,
+):
     response = authorization_http.get(
         "/authorize",
-        query_string=authorization_query(redirect_uri="https://attacker.invalid/cb"),
+        query_string=authorization_query(
+            redirect_uri="https://attacker.invalid/cb"
+        ),
     )
     assert response.status_code == 400
     assert "Location" not in response.headers
@@ -54,7 +59,8 @@ def test_authorize_invalid_scope_redirects_only_to_trusted_callback_with_state(
     authorization_http,
 ):
     response = authorization_http.get(
-        "/authorize", query_string=authorization_query(scope="read administrator")
+        "/authorize",
+        query_string=authorization_query(scope="read administrator"),
     )
     parsed, params = redirect_query(response)
     assert response.status_code == 302
@@ -84,6 +90,20 @@ def test_authorize_requires_canonical_s256_pkce(
     _, params = redirect_query(response)
     assert response.status_code == 302
     assert params == {"error": "invalid_request", "state": "state-1"}
+
+
+def test_approval_page_shows_received_state(authorization_http):
+    response = authorization_http.get(
+        "/authorize",
+        query_string=authorization_query(state="received-state-42"),
+    )
+    page = response.get_data(as_text=True)
+
+    assert response.status_code == 200
+    assert "<strong>State:</strong>" in page
+    assert "<code data-copy-value>received-state-42</code>" in page, (
+        "Show the state value the client sent on the approval page"
+    )
 
 
 def test_authorize_and_approve_issue_state_bound_code_with_narrowed_scope(
@@ -123,7 +143,9 @@ def test_approval_request_is_one_use_even_after_denial(
 ):
     authorization_http.get("/authorize", query_string=authorization_query())
     request_id = next(iter(authorization_server.approval_requests))
-    denied = authorization_http.post("/approve", data={"reqid": request_id, "deny": "Deny"})
+    denied = authorization_http.post(
+        "/approve", data={"reqid": request_id, "deny": "Deny"}
+    )
     _, params = redirect_query(denied)
     assert params == {"error": "access_denied", "state": "state-1"}
     replay = authorization_http.post(
@@ -161,7 +183,9 @@ def test_authorization_code_exchange_issues_and_persists_exact_token_pair(
         authorization_http, authorization_server, scope="read write"
     )
     token_values = Mock(side_effect=["issued-access", "issued-refresh"])
-    monkeypatch.setattr(authorization_server.secrets, "token_urlsafe", token_values)
+    monkeypatch.setattr(
+        authorization_server.secrets, "token_urlsafe", token_values
+    )
 
     response = authorization_http.post(
         "/token",
@@ -225,18 +249,21 @@ def test_concurrent_same_code_redemption_has_one_success_and_one_invalid_grant(
         second_result = executor.submit(redeem_code, second_request_started)
         assert second_request_started.wait(timeout=5)
         release_first_issue.set()
-        results = [first_result.result(timeout=5), second_result.result(timeout=5)]
+        results = [
+            first_result.result(timeout=5),
+            second_result.result(timeout=5),
+        ]
 
     assert sorted(status for status, _ in results) == [200, 400]
     success_body = next(body for status, body in results if status == 200)
     failure_body = next(body for status, body in results if status == 400)
     assert failure_body == {"error": "invalid_grant"}
-    assert oauth_store.find_access_token(success_body["access_token"])["scope"] == (
-        "read write"
+    issued_access = oauth_store.find_access_token(success_body["access_token"])
+    issued_refresh = oauth_store.find_refresh_token(
+        success_body["refresh_token"]
     )
-    assert oauth_store.find_refresh_token(success_body["refresh_token"])["scope"] == (
-        "read write"
-    )
+    assert issued_access["scope"] == "read write"
+    assert issued_refresh["scope"] == "read write"
     assert code not in authorization_server.authorization_codes
 
 
@@ -291,20 +318,30 @@ def test_token_endpoint_rejects_json_as_invalid_request(
         {"Authorization": "Basic bm8tY29sb24="},
         oauth_form_headers(CLIENT_ID, "wrong-secret"),
     ],
-    ids=["missing", "wrong-scheme", "bad-base64", "missing-colon", "wrong-secret"],
+    ids=[
+        "missing",
+        "wrong-scheme",
+        "bad-base64",
+        "missing-colon",
+        "wrong-secret",
+    ],
 )
 def test_token_endpoint_rejects_invalid_client_with_exact_challenge(
     headers, authorization_http
 ):
     response = authorization_http.post(
-        "/token", data={"grant_type": "refresh_token", "refresh_token": "r"}, headers=headers
+        "/token",
+        data={"grant_type": "refresh_token", "refresh_token": "r"},
+        headers=headers,
     )
     assert response.status_code == 401
     assert response.get_json() == {"error": "invalid_client"}
     assert response.headers["WWW-Authenticate"] == 'Basic realm="token"'
 
 
-def test_token_endpoint_rejects_mixed_basic_and_body_credentials(authorization_http):
+def test_token_endpoint_rejects_mixed_basic_and_body_credentials(
+    authorization_http,
+):
     response = authorization_http.post(
         "/token",
         data={
@@ -326,7 +363,9 @@ def test_code_database_failure_returns_503_and_keeps_code_retriable(
     code, _, _ = issue_authorization_code(
         authorization_http, authorization_server, scope="read"
     )
-    issue = Mock(side_effect=authorization_server.DatabaseError("database down"))
+    issue = Mock(
+        side_effect=authorization_server.DatabaseError("database down")
+    )
     monkeypatch.setattr(authorization_server, "issue_token_pair", issue)
     response = authorization_http.post(
         "/token", data=exchange_code_form(code), headers=oauth_form_headers()
@@ -341,7 +380,9 @@ def test_refresh_rotates_once_preserves_scope_and_rejects_replay(
     authorization_server, authorization_http, oauth_store, monkeypatch
 ):
     oauth_store.insert_refresh_token("old-refresh", CLIENT_ID, "read delete")
-    values = Mock(side_effect=["new-access", "new-refresh", "unused-a", "unused-r"])
+    values = Mock(
+        side_effect=["new-access", "new-refresh", "unused-a", "unused-r"]
+    )
     monkeypatch.setattr(authorization_server.secrets, "token_urlsafe", values)
     form = {"grant_type": "refresh_token", "refresh_token": "old-refresh"}
 
@@ -356,8 +397,10 @@ def test_refresh_rotates_once_preserves_scope_and_rejects_replay(
         "scope": "read delete",
     }
     assert oauth_store.find_refresh_token("old-refresh") is None
-    assert oauth_store.find_access_token("new-access")["scope"] == "read delete"
-    assert oauth_store.find_refresh_token("new-refresh")["scope"] == "read delete"
+    new_access = oauth_store.find_access_token("new-access")
+    new_refresh = oauth_store.find_refresh_token("new-refresh")
+    assert new_access["scope"] == "read delete"
+    assert new_refresh["scope"] == "read delete"
 
     replay = authorization_http.post(
         "/token", data=form, headers=oauth_form_headers()
@@ -370,7 +413,9 @@ def test_refresh_database_failure_returns_503_without_consuming_token(
     authorization_server, authorization_http, oauth_store, monkeypatch
 ):
     oauth_store.insert_refresh_token("old-refresh", CLIENT_ID, "write")
-    rotate = Mock(side_effect=authorization_server.DatabaseError("database down"))
+    rotate = Mock(
+        side_effect=authorization_server.DatabaseError("database down")
+    )
     monkeypatch.setattr(authorization_server, "rotate_refresh_token", rotate)
     response = authorization_http.post(
         "/token",

@@ -1,11 +1,14 @@
 def table_columns(oauth_store, table):
     with oauth_store._connect() as connection:
-        return [dict(row) for row in connection.execute(f"PRAGMA table_info({table})")]
+        rows = connection.execute(f"PRAGMA table_info({table})")
+        return [dict(row) for row in rows]
 
 
 def test_reset_schema_creates_owner_aware_empty_tables(oauth_store):
     oauth_store.insert_access_token("discard-me", "client", "movies", "alice")
-    oauth_store.insert_refresh_token("discard-refresh", "client", "movies", "alice")
+    oauth_store.insert_refresh_token(
+        "discard-refresh", "client", "movies", "alice"
+    )
     oauth_store.reset_schema()
 
     for table, token_column in (
@@ -22,10 +25,15 @@ def test_reset_schema_creates_owner_aware_empty_tables(oauth_store):
         assert columns[0]["pk"] == 1
         assert all(column["notnull"] == 1 for column in columns[1:])
         with oauth_store._connect() as connection:
-            assert connection.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0] == 0
+            count_row = connection.execute(
+                f"SELECT COUNT(*) FROM {table}"
+            ).fetchone()
+            assert count_row[0] == 0
 
 
-def test_initialize_schema_migrates_legacy_rows_without_discarding_them(oauth_store):
+def test_initialize_schema_migrates_legacy_rows_without_discarding_them(
+    oauth_store,
+):
     with oauth_store._connect() as connection:
         connection.executescript(
             """
@@ -41,8 +49,10 @@ def test_initialize_schema_migrates_legacy_rows_without_discarding_them(oauth_st
                 client_id TEXT NOT NULL,
                 scope TEXT NOT NULL
             );
-            INSERT INTO access_tokens VALUES ('legacy-access', 'legacy-client', 'movies');
-            INSERT INTO refresh_tokens VALUES ('legacy-refresh', 'legacy-client', 'foods');
+            INSERT INTO access_tokens
+                VALUES ('legacy-access', 'legacy-client', 'movies');
+            INSERT INTO refresh_tokens
+                VALUES ('legacy-refresh', 'legacy-client', 'foods');
             """
         )
 
@@ -81,7 +91,9 @@ def test_issue_pair_persists_matching_scope_and_owner(oauth_store):
     }
 
 
-def test_rotation_preserves_scope_owner_and_rejects_wrong_client_and_replay(oauth_store):
+def test_rotation_preserves_scope_owner_and_rejects_wrong_client_and_replay(
+    oauth_store,
+):
     oauth_store.issue_token_pair(
         "first-access", "first-refresh", "client", "foods music", "alice"
     )
@@ -103,8 +115,9 @@ def test_rotation_preserves_scope_owner_and_rejects_wrong_client_and_replay(oaut
         "resource_owner": "alice",
     }
     assert oauth_store.find_refresh_token("first-refresh") is None
-    assert oauth_store.find_access_token("second-access")["resource_owner"] == "alice"
-    assert oauth_store.find_access_token("second-access")["scope"] == "foods music"
+    second_access = oauth_store.find_access_token("second-access")
+    assert second_access["resource_owner"] == "alice"
+    assert second_access["scope"] == "foods music"
     assert oauth_store.rotate_refresh_token(
         "first-refresh", "third-access", "third-refresh", "client"
     ) is None
