@@ -29,7 +29,7 @@ AUTH_SERVER = {
 CLIENT = {
     "client_id": "",
     "client_secret": "",
-    "redirect_uris": ["http://localhost:9000/callback"],
+    "redirect_uris": "http://localhost:9000/callback",
 }
 
 PROTECTED_RESOURCE = "http://localhost:9002/resource"
@@ -114,11 +114,6 @@ def authorize() -> tuple[str, int]:
 @app.get("/callback")
 def callback() -> tuple[str, int]:
     return todo("exchange the code with the PKCE verifier.")
-
-
-@app.get("/fetch_resource")
-def fetch_resource() -> tuple[str, int]:
-    return todo("send the access token to the protected resource.")
 
 
 if __name__ == "__main__":

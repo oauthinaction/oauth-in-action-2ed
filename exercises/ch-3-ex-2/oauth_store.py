@@ -70,13 +70,13 @@ def reset_schema() -> None:
         )
 
 
-def insert_refresh_token(refresh_token: str, client_id: str) -> None:
-    """Store a refresh token for later exchanges."""
+def seed_refresh_token(refresh_token: str, client_id: str) -> None:
+    """Insert or replace a refresh token used by an exercise."""
     initialize_schema()
     with _connect() as connection:
         connection.execute(
-            """INSERT INTO refresh_tokens (refresh_token, client_id)
-               VALUES (?, ?)""",
+            """INSERT OR REPLACE INTO refresh_tokens
+               (refresh_token, client_id) VALUES (?, ?)""",
             (refresh_token, client_id),
         )
 
@@ -94,7 +94,7 @@ def find_refresh_token(refresh_token: str) -> RefreshToken | None:
 
 
 def insert_access_token(access_token: str, client_id: str) -> None:
-    """Store a non-expiring access token for resource-server validation."""
+    """Store an access token for resource-server validation."""
     initialize_schema()
     with _connect() as connection:
         connection.execute(
@@ -114,42 +114,3 @@ def find_access_token(access_token: str) -> AccessToken | None:
             (access_token,),
         ).fetchone()
     return AccessToken(**dict(row)) if row else None
-
-
-def rotate_refresh_token(
-    presented_refresh_token: str,
-    new_access_token: str,
-    new_refresh_token: str,
-    client_id: str,
-) -> RefreshToken | None:
-    """Atomically consume a refresh token and persist its replacements."""
-    initialize_schema()
-    with _connect() as connection:
-        connection.execute("BEGIN IMMEDIATE")
-        row = connection.execute(
-            """SELECT refresh_token, client_id FROM refresh_tokens
-               WHERE refresh_token = ? AND client_id = ?""",
-            (presented_refresh_token, client_id),
-        ).fetchone()
-        if row is None:
-            return None
-
-        connection.execute(
-            "DELETE FROM refresh_tokens WHERE refresh_token = ?",
-            (presented_refresh_token,),
-        )
-        connection.execute(
-            """INSERT INTO access_tokens (access_token, client_id)
-               VALUES (?, ?)""",
-            (new_access_token, client_id),
-        )
-        connection.execute(
-            """INSERT INTO refresh_tokens (refresh_token, client_id)
-               VALUES (?, ?)""",
-            (new_refresh_token, client_id),
-        )
-
-    return RefreshToken(
-        refresh_token=new_refresh_token,
-        client_id=client_id,
-    )

@@ -475,3 +475,43 @@ def test_information_pages_expose_expected_copy_controls(
         assert value in resource_page.data
     assert resource_page.data.count(b"data-copy-value") == 3
     assert resource_page.data.count(b"data-copy-button") == 3
+
+
+def test_resource_success_includes_epoch_timestamp(
+    resource_http,
+    protected_resource,
+    oauth_store,
+    monkeypatch,
+):
+    oauth_store.insert_access_token("timestamp-token", CLIENT_ID)
+    monkeypatch.setattr(protected_resource.time, "time", lambda: 1700000000.9)
+
+    response = resource_http.post(
+        "/resource",
+        headers={"Authorization": "Bearer timestamp-token"},
+    )
+
+    assert response.status_code == 200
+    assert response.get_json() == {
+        "name": "Protected Resource",
+        "description": "This data has been protected by OAuth 2.0",
+        "timestamp": 1700000000,
+    }, "Return the resource with the current time as integer epoch seconds"
+
+
+def test_redirect_uri_must_match_exactly(authorization_http):
+    for near_miss in (
+        "http://localhost:9000/call",
+        "localhost:9000/callback",
+        "http://localhost:9000/callback/extra",
+    ):
+        response = authorization_http.get(
+            "/authorize",
+            query_string={"client_id": CLIENT_ID, "redirect_uri": near_miss},
+        )
+        assert response.status_code == 400, (
+            f"Reject {near_miss}: compare the whole redirect URI, "
+            "not part of it"
+        )
+        assert b"Invalid redirect URI" in response.data
+        assert "Location" not in response.headers

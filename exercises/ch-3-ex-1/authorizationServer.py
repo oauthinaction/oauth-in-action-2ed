@@ -38,7 +38,7 @@ CLIENTS = [
     {
         "client_id": "oauth-client-1",
         "client_secret": "oauth-client-secret-1",
-        "redirect_uris": ["http://localhost:9000/callback"],
+        "redirect_uris": "http://localhost:9000/callback",
     }
 ]
 PKCE_VERIFIER_CHARACTERS = frozenset(
@@ -219,7 +219,7 @@ def authorize() -> Response | str:
         return render_template("error.html", error="Unknown client"), 400
 
     redirect_uri = request.args.get("redirect_uri")
-    if redirect_uri not in client["redirect_uris"]:
+    if redirect_uri != client["redirect_uris"]:
         return render_template("error.html", error="Invalid redirect URI"), 400
 
     code_challenge = request.args.get("code_challenge")

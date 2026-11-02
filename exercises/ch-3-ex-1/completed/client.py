@@ -27,7 +27,7 @@ AUTH_SERVER = {
 CLIENT = {
     "client_id": "oauth-client-1",
     "client_secret": "oauth-client-secret-1",
-    "redirect_uris": ["http://localhost:9000/callback"],
+    "redirect_uris": "http://localhost:9000/callback",
 }
 PROTECTED_RESOURCE = "http://localhost:9002/resource"
 REQUEST_TIMEOUT = 5
@@ -106,7 +106,7 @@ def authorize() -> Response:
     authorization_params = {
         "response_type": "code",
         "client_id": CLIENT["client_id"],
-        "redirect_uri": CLIENT["redirect_uris"][0],
+        "redirect_uri": CLIENT["redirect_uris"],
         "code_challenge": code_challenge,
         "code_challenge_method": "S256",
     }
@@ -135,7 +135,7 @@ def callback() -> str | tuple[str, int]:
     form_data = {
         "grant_type": "authorization_code",
         "code": code,
-        "redirect_uri": CLIENT["redirect_uris"][0],
+        "redirect_uri": CLIENT["redirect_uris"],
         "code_verifier": current_code_verifier,
     }
     basic_credentials = encode_client_credentials(
@@ -153,8 +153,7 @@ def callback() -> str | tuple[str, int]:
             timeout=REQUEST_TIMEOUT,
             allow_redirects=False,
         )
-        token_request_succeeded = 200 <= token_response.status_code < 300
-        if not token_request_succeeded:
+        if not token_response.status_code == 200:
             return client_error(
                 "Unable to fetch access token, server response: "
                 f"{token_response.status_code}"
@@ -166,33 +165,6 @@ def callback() -> str | tuple[str, int]:
     token_body = response_json(token_response)
     access_token = token_body.get("access_token") if token_body else None
     return render_template("index.html", access_token=access_token)
-
-
-@app.get("/fetch_resource")
-def fetch_resource() -> str | tuple[str, int]:
-    global access_token
-    if not access_token:
-        return client_error("Missing Access Token")
-
-    headers = {"Authorization": f"Bearer {access_token}"}
-    try:
-        resource_response = requests.post(
-            PROTECTED_RESOURCE,
-            headers=headers,
-            timeout=REQUEST_TIMEOUT,
-            allow_redirects=False,
-        )
-        resource_request_succeeded = 200 <= resource_response.status_code < 300
-        if not resource_request_succeeded:
-            access_token = None
-            return client_error(str(resource_response.status_code))
-        resource_response.raise_for_status()
-    except requests.RequestException as error:
-        access_token = None
-        return client_error(f"Unable to fetch resource: {error}")
-
-    resource_body = response_json(resource_response)
-    return render_template("data.html", resource=resource_body)
 
 
 if __name__ == "__main__":

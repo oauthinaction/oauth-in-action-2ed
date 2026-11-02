@@ -13,7 +13,7 @@ Python normally uses its standard-library `sqlite3` module. On Linux with Python
 
 The suite always loads the root `client.py`. It is intended to validate the practitioner's completed work in place and never loads `completed/client.py`; that directory is only an answer key.
 
-An initial exercise implementation is expected to report three milestone failures: constructing the authorization redirect, exchanging the authorization code with the PKCE verifier, and sending the access token as a Bearer credential. Secondary error-path cases blocked by an unimplemented HTTP 501 response are skipped. As each milestone is implemented in the root `client.py`, the goal is for every test to pass.
+An initial exercise implementation is expected to report two milestone failures: constructing the authorization redirect, and exchanging the authorization code with the PKCE verifier. Fetching the protected resource is the Exercise 2 activity, so this client has no Fetch protected resource button. Secondary error-path cases blocked by an unimplemented HTTP 501 response are skipped. A token response counts as successful only with status 200. As each milestone is implemented in the root `client.py`, the goal is for every test to pass.
 
 No live services are required. Flask test clients call all three applications in process, outbound Requests calls are replaced with `unittest.mock.Mock`, and every test receives a fresh temporary SQLite database. These boundaries keep the suite isolated from the network and persistent local data while checking the request contracts used by the exercise.
 

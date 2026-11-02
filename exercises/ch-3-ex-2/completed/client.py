@@ -1,11 +1,9 @@
-"""Completed refresh-token client for Chapter 3 Exercise 2."""
+"""Completed client for Chapter 3 Exercise 2: PKCE plus OAuth state."""
 
 import base64
-from datetime import datetime
 import hashlib
 from pathlib import Path
 import secrets
-import time
 from typing import Any
 from urllib.parse import parse_qsl, quote_plus, urlencode, urlsplit, urlunsplit
 
@@ -29,23 +27,15 @@ AUTH_SERVER = {
 CLIENT = {
     "client_id": "oauth-client-1",
     "client_secret": "oauth-client-secret-1",
-    "redirect_uris": ["http://localhost:9000/callback"],
+    "redirect_uris": "http://localhost:9000/callback",
 }
 PROTECTED_RESOURCE = "http://localhost:9002/resource"
 REQUEST_TIMEOUT = 5
-REFRESH_COOLDOWN_SECONDS = 20
-
-# Intentional Exercise 2 teaching fixtures: the access token starts invalid
-# while the authorization server recognizes the refresh token.
-INITIAL_ACCESS_TOKEN = "987tghjkiu6trfghjuytrghj"
-INITIAL_REFRESH_TOKEN = "j2r3oj32r23rmasd98uhjrk2o3i"
 
 # Deliberate single-user shortcut: all browser users share these values.
+state: str | None = None
 code_verifier: str | None = None
-access_token: str | None = INITIAL_ACCESS_TOKEN
-refresh_token: str | None = INITIAL_REFRESH_TOKEN
-# Epoch seconds of the last successful refresh; None until one happens.
-last_refresh_epoch: int | None = None
+access_token: str | None = None
 
 
 def build_url(
@@ -103,49 +93,23 @@ def generate_code_challenge(verifier: str) -> str:
     return padded_challenge.rstrip("=")
 
 
-def format_local_time(epoch: int) -> str:
-    """Show epoch seconds as a date and time in this machine's timezone."""
-    local_time = datetime.fromtimestamp(epoch).astimezone()
-    return local_time.strftime("%Y-%m-%d %H:%M:%S %Z")
-
-
-def seconds_until_refresh_allowed() -> int:
-    """Return how many seconds remain before another refresh is allowed."""
-    if last_refresh_epoch is None:
-        return 0
-    seconds_since_refresh = int(time.time()) - last_refresh_epoch
-    remaining_seconds = REFRESH_COOLDOWN_SECONDS - seconds_since_refresh
-    return max(remaining_seconds, 0)
-
-
-def client_index(notice: str | None = None) -> str:
-    last_refresh_time = None
-    if last_refresh_epoch is not None:
-        last_refresh_time = format_local_time(last_refresh_epoch)
-    return render_template(
-        "index.html",
-        access_token=access_token,
-        refresh_token=refresh_token,
-        last_refresh_time=last_refresh_time,
-        notice=notice,
-    )
-
-
 @app.get("/")
 def index() -> str:
-    return client_index()
+    return render_template("index.html", access_token=access_token)
 
 
 @app.get("/authorize")
 def authorize() -> Response:
-    global access_token, code_verifier
+    global access_token, code_verifier, state
     access_token = None
+    state = secrets.token_urlsafe(24)
     code_verifier = generate_code_verifier()
     code_challenge = generate_code_challenge(code_verifier)
     authorization_params = {
         "response_type": "code",
         "client_id": CLIENT["client_id"],
-        "redirect_uri": CLIENT["redirect_uris"][0],
+        "redirect_uri": CLIENT["redirect_uris"],
+        "state": state,
         "code_challenge": code_challenge,
         "code_challenge_method": "S256",
     }
@@ -157,13 +121,18 @@ def authorize() -> Response:
 
 @app.get("/callback")
 def callback() -> str | tuple[str, int]:
-    global access_token, code_verifier, refresh_token
+    global access_token, code_verifier
     current_code_verifier = code_verifier
     code_verifier = None
 
     authorization_error = request.args.get("error")
     if authorization_error:
         return client_error(authorization_error)
+
+    returned_state = request.args.get("state")
+    if state is None or returned_state != state:
+        return client_error("State value did not match")
+
     if current_code_verifier is None:
         return client_error("Missing PKCE code verifier")
 
@@ -174,7 +143,7 @@ def callback() -> str | tuple[str, int]:
     form_data = {
         "grant_type": "authorization_code",
         "code": code,
-        "redirect_uri": CLIENT["redirect_uris"][0],
+        "redirect_uri": CLIENT["redirect_uris"],
         "code_verifier": current_code_verifier,
     }
     basic_credentials = encode_client_credentials(
@@ -192,8 +161,7 @@ def callback() -> str | tuple[str, int]:
             timeout=REQUEST_TIMEOUT,
             allow_redirects=False,
         )
-        token_request_succeeded = 200 <= token_response.status_code < 300
-        if not token_request_succeeded:
+        if not token_response.status_code == 200:
             return client_error(
                 "Unable to fetch access token, server response: "
                 f"{token_response.status_code}"
@@ -204,19 +172,16 @@ def callback() -> str | tuple[str, int]:
 
     token_body = response_json(token_response)
     access_token = token_body.get("access_token") if token_body else None
-    # Keep the current refresh token unless the server issues a new one.
-    if token_body and token_body.get("refresh_token"):
-        refresh_token = token_body["refresh_token"]
-    return client_index()
+    return render_template("index.html", access_token=access_token)
 
 
 @app.get("/fetch_resource")
 def fetch_resource() -> str | tuple[str, int]:
     global access_token
-    headers = {
-        "Authorization": f"Bearer {access_token}",
-        "Content-Type": "application/x-www-form-urlencoded",
-    }
+    if not access_token:
+        return client_error("Missing Access Token")
+
+    headers = {"Authorization": f"Bearer {access_token}"}
     try:
         resource_response = requests.post(
             PROTECTED_RESOURCE,
@@ -224,93 +189,19 @@ def fetch_resource() -> str | tuple[str, int]:
             timeout=REQUEST_TIMEOUT,
             allow_redirects=False,
         )
+        if not resource_response.status_code == 200:
+            access_token = None
+            return client_error(
+                f"Status: {resource_response.status_code}, "
+                "unable to fetch resource."
+            )
+        resource_response.raise_for_status()
     except requests.RequestException as error:
         access_token = None
         return client_error(f"Unable to fetch resource: {error}")
 
-    resource_request_succeeded = 200 <= resource_response.status_code < 300
-    if resource_request_succeeded:
-        resource_response.raise_for_status()
-        resource_body = response_json(resource_response)
-        return render_template("data.html", resource=resource_body)
-
-    access_token = None
-    if resource_response.status_code == 401:
-        # Report the 401; refreshing is the user's next, separate step.
-        return client_index(
-            notice=(
-                "The protected resource returned 401 Unauthorized. "
-                "Refresh the token, then fetch the protected "
-                "resource again."
-            )
-        )
-    return client_error(
-        f"Unable to fetch resource. Status {resource_response.status_code}"
-    )
-
-
-@app.post("/refresh")
-def refresh() -> Response | str | tuple[str, int]:
-    global last_refresh_epoch
-    if not refresh_token:
-        return client_error("No refresh token available.")
-
-    refresh_wait_seconds = seconds_until_refresh_allowed()
-    if refresh_wait_seconds > 0:
-        return client_index(
-            notice=(
-                f"You need to wait {refresh_wait_seconds} seconds "
-                "before you can refresh again."
-            )
-        )
-
-    token_refreshed = refresh_access_token()
-    if not token_refreshed:
-        return client_error("Unable to refresh token.")
-
-    last_refresh_epoch = int(time.time())
-    return redirect("/", code=303)
-
-
-def refresh_access_token() -> bool:
-    """Exchange the refresh token and store both rotated token values."""
-    global access_token, refresh_token
-    if not refresh_token:
-        return False
-
-    form_data = {
-        "grant_type": "refresh_token",
-        "refresh_token": refresh_token,
-    }
-    basic_credentials = encode_client_credentials(
-        CLIENT["client_id"], CLIENT["client_secret"]
-    )
-    headers = {
-        "Content-Type": "application/x-www-form-urlencoded",
-        "Authorization": f"Basic {basic_credentials}",
-    }
-    try:
-        token_response = requests.post(
-            AUTH_SERVER["token_endpoint"],
-            data=form_data,
-            headers=headers,
-            timeout=REQUEST_TIMEOUT,
-            allow_redirects=False,
-        )
-        refresh_request_succeeded = 200 <= token_response.status_code < 300
-        if not refresh_request_succeeded:
-            refresh_token = None
-            return False
-        token_response.raise_for_status()
-    except requests.RequestException:
-        refresh_token = None
-        return False
-
-    token_body = response_json(token_response)
-    access_token = token_body.get("access_token") if token_body else None
-    if token_body and token_body.get("refresh_token"):
-        refresh_token = token_body["refresh_token"]
-    return True
+    resource_body = response_json(resource_response)
+    return render_template("data.html", resource=resource_body)
 
 
 if __name__ == "__main__":

@@ -165,32 +165,6 @@ def test_callback_posts_code_contract(
     )
 
 
-def test_fetch_resource_sends_bearer_contract(
-    client_module,
-    client_http,
-    requests_post,
-):
-    client_module.access_token = "access-123"
-    requests_post.return_value = oauth_response(
-        payload={"name": "Protected Resource", "description": "private"}
-    )
-    requests_post.side_effect = None
-
-    response = client_http.get("/fetch_resource")
-
-    assert response.status_code == 200, (
-        "Send the access token as a Bearer credential to the protected "
-        "resource"
-    )
-    requests_post.assert_called_once_with(
-        "http://localhost:9002/resource",
-        headers={"Authorization": "Bearer access-123"},
-        timeout=5,
-        allow_redirects=False,
-    )
-    assert b"Protected Resource" in response.data
-
-
 def test_callback_without_code_verifier_makes_no_token_request(
     client_module,
     client_http,
@@ -207,15 +181,17 @@ def test_callback_without_code_verifier_makes_no_token_request(
     requests_post.assert_not_called()
 
 
+@pytest.mark.parametrize("token_status", [302, 201])
 def test_callback_rejects_token_endpoint_redirect(
     client_module,
     client_http,
     requests_post,
+    token_status,
 ):
     client_module.code_verifier = TEST_CODE_VERIFIER
     client_module.access_token = None
     requests_post.return_value = oauth_response(
-        status=302,
+        status=token_status,
         payload={"access_token": "redirect-access"},
     )
     requests_post.side_effect = None
@@ -224,58 +200,12 @@ def test_callback_rejects_token_endpoint_redirect(
 
     if response.status_code == 501:
         pytest.skip("Starter callback TODO blocks token redirect handling")
-    assert b"server response: 302" in response.data, (
-        "Accept token responses only when the endpoint returns an exact "
-        "2xx status"
+    assert f"server response: {token_status}".encode() in response.data, (
+        "Accept token responses only when the endpoint returns "
+        "status 200"
     )
     assert client_module.access_token is None
     assert b"redirect-access" not in response.data
-
-
-def test_resource_reports_upstream_failure(
-    client_module,
-    client_http,
-    requests_post,
-):
-    client_module.access_token = "rejected-token"
-    requests_post.return_value = oauth_response(
-        status=401,
-        payload={"error": "invalid_token"},
-    )
-    requests_post.side_effect = None
-    response = client_http.get("/fetch_resource")
-    if response.status_code == 501:
-        pytest.skip(
-            "Starter resource TODO blocks protected-resource error handling"
-        )
-    assert b"401" in response.data, (
-        "Surface a protected-resource rejection and discard the rejected "
-        "access token"
-    )
-    assert client_module.access_token is None
-
-
-def test_resource_rejects_upstream_redirect(
-    client_module,
-    client_http,
-    requests_post,
-):
-    client_module.access_token = "redirected-token"
-    requests_post.return_value = oauth_response(
-        status=302,
-        payload={"name": "Redirected Protected Resource"},
-    )
-    requests_post.side_effect = None
-
-    response = client_http.get("/fetch_resource")
-
-    if response.status_code == 501:
-        pytest.skip("Starter resource TODO blocks resource redirect handling")
-    assert b"302" in response.data, (
-        "Accept protected-resource responses only for an exact 2xx status"
-    )
-    assert b"Redirected Protected Resource" not in response.data
-    assert client_module.access_token is None
 
 
 def test_home_page_renders_from_exercise_root(client_http):
@@ -356,25 +286,3 @@ def test_callback_connection_failure_is_rendered_not_500(
         "HTTP 500"
     )
     assert b"Unable to fetch access token" in response.data
-
-
-def test_resource_connection_failure_is_rendered_not_500(
-    client_module,
-    client_http,
-    requests_post,
-):
-    client_module.access_token = "access-123"
-    requests_post.side_effect = requests.ConnectionError(
-        "resource unavailable"
-    )
-
-    response = client_http.get("/fetch_resource")
-
-    if response.status_code == 501:
-        pytest.skip("Starter resource TODO blocks connection-failure handling")
-    assert response.status_code == 200, (
-        "Render a controlled protected-resource error instead of returning "
-        "HTTP 500"
-    )
-    assert b"Unable to fetch resource" in response.data
-    assert client_module.access_token is None

@@ -1,0 +1,88 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Approve Authorization</title>
+  <link rel="stylesheet" href="/assets/common.css">
+  <script src="/assets/common.js" defer></script>
+</head>
+<body class="authorization">
+  <header class="site-header">
+    <div class="header-inner">
+      <a class="brand" href="/">OAuth in Action</a>
+      <span class="service-label">Authorization Server - localhost:9001</span>
+    </div>
+  </header>
+  <main>
+    <p class="visually-hidden" data-copy-status aria-live="polite"></p>
+    <section class="panel">
+      <h1>Approve this client?</h1>
+      {% if client.client_name %}
+        <p><strong>Name:</strong> <code>{{ client.client_name }}</code></p>
+      {% endif %}
+      <p>
+        <strong>Client ID:</strong>
+        <span class="copyable-inline" data-copy-container>
+          <code data-copy-value>{{ client.client_id }}</code>
+          <button class="copy-button" type="button" data-copy-button
+            aria-label="Copy client ID" title="Copy client ID">
+            <span class="copy-icon" aria-hidden="true"></span>
+          </button>
+        </span>
+      </p>
+      <p>
+        <strong>State:</strong>
+        {% if state %}
+          <span class="copyable-inline" data-copy-container>
+            <code data-copy-value>{{ state }}</code>
+            <button class="copy-button" type="button" data-copy-button
+              aria-label="Copy state" title="Copy state">
+              <span class="copy-icon" aria-hidden="true"></span>
+            </button>
+          </span>
+        {% else %}
+          <span class="token value-missing">NONE</span>
+        {% endif %}
+      </p>
+      {% if client.client_uri %}
+        <p>
+          <strong>URI:</strong>
+          <span class="copyable-inline" data-copy-container>
+            <code data-copy-value>{{ client.client_uri }}</code>
+            <button class="copy-button" type="button" data-copy-button
+              aria-label="Copy client URI" title="Copy client URI">
+              <span class="copy-icon" aria-hidden="true"></span>
+            </button>
+          </span>
+        </p>
+      {% endif %}
+      {% if client.logo_uri %}
+        <p>
+          <img
+            src="{{ client.logo_uri }}"
+            alt="{{ client.client_name or client.client_id }} logo"
+          >
+        </p>
+      {% endif %}
+      <form action="/approve" method="post">
+        <input type="hidden" name="reqid" value="{{ reqid }}">
+        <div class="actions">
+          <button
+            class="button button-approve"
+            type="submit"
+            name="approve"
+            value="Approve"
+          >Approve</button>
+          <button
+            class="button button-deny"
+            type="submit"
+            name="deny"
+            value="Deny"
+          >Deny</button>
+        </div>
+      </form>
+    </section>
+  </main>
+</body>
+</html>

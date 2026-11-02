@@ -136,112 +136,6 @@ code,
   word-break: break-word;
 }
 
-ul.clean {
-  padding: 0;
-  list-style: none;
-}
-
-.actions {
-  display: flex;
-  flex-wrap: wrap;
-  gap: .7rem;
-  margin-top: 1.25rem;
-}
-
-.button {
-  display: inline-block;
-  padding: .65rem 1rem;
-  border: 2px solid transparent;
-  border-radius: .4rem;
-  font: inherit;
-  font-weight: 700;
-  text-decoration: none;
-  cursor: pointer;
-}
-
-.button-primary {
-  color: #fff;
-  background: #1559a5;
-}
-
-.button-approve {
-  color: #fff;
-  background: #18743a;
-}
-
-.button-deny {
-  color: #fff;
-  background: #a12626;
-}
-
-.button-secondary {
-  color: #172033;
-  background: #e5eaf2;
-}
-
-.button-refresh {
-  color: #fff;
-  background: #5b3a99;
-}
-
-.inline-form {
-  display: contents;
-}
-
-.notice {
-  padding: .75rem 1rem;
-  border-left: .35rem solid #b54708;
-  border-radius: .25rem;
-  color: #172033;
-  background: #fff4e5;
-}
-
-.error {
-  border-left: .35rem solid #b42318;
-}
-
-pre {
-  margin: 0;
-  padding: 1rem;
-  overflow: auto;
-  overflow-wrap: anywhere;
-  border: 1px solid #c4cad4;
-  border-radius: .5rem;
-  color: #172033;
-  background: #f4f6f9;
-  white-space: pre-wrap;
-}
-
-.muted {
-  color: #586579;
-}
-
-@media (max-width: 38rem) {
-  .header-inner {
-    flex-direction: column;
-    align-items: flex-start;
-    gap: .2rem;
-  }
-
-  dl {
-    grid-template-columns: 1fr;
-    gap: .2rem;
-  }
-
-  dd {
-    margin-bottom: .65rem;
-  }
-
-  .actions {
-    flex-direction: column;
-  }
-
-  .button {
-    width: 100%;
-    text-align: center;
-  }
-}
-
 .copyable-inline {
   display: inline-flex;
   max-width: 100%;
@@ -336,4 +230,93 @@ pre {
 .value-missing {
   color: #b42318;
   font-weight: 700;
+}
+
+ul.clean {
+  padding: 0;
+  list-style: none;
+}
+
+.actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: .7rem;
+  margin-top: 1.25rem;
+}
+
+.button {
+  display: inline-block;
+  padding: .65rem 1rem;
+  border: 2px solid transparent;
+  border-radius: .4rem;
+  font: inherit;
+  font-weight: 700;
+  text-decoration: none;
+  cursor: pointer;
+}
+
+.button-primary {
+  color: #fff;
+  background: #1559a5;
+}
+
+.button-approve {
+  color: #fff;
+  background: #18743a;
+}
+
+.button-deny {
+  color: #fff;
+  background: #a12626;
+}
+
+.button-secondary {
+  color: #172033;
+  background: #e5eaf2;
+}
+
+.error {
+  border-left: .35rem solid #b42318;
+}
+
+pre {
+  margin: 0;
+  padding: 1rem;
+  overflow: auto;
+  overflow-wrap: anywhere;
+  border: 1px solid #c4cad4;
+  border-radius: .5rem;
+  color: #172033;
+  background: #f4f6f9;
+  white-space: pre-wrap;
+}
+
+.muted {
+  color: #586579;
+}
+
+@media (max-width: 38rem) {
+  .header-inner {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: .2rem;
+  }
+
+  dl {
+    grid-template-columns: 1fr;
+    gap: .2rem;
+  }
+
+  dd {
+    margin-bottom: .65rem;
+  }
+
+  .actions {
+    flex-direction: column;
+  }
+
+  .button {
+    width: 100%;
+    text-align: center;
+  }
 }

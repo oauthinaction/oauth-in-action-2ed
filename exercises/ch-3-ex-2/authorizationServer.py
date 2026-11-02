@@ -1,4 +1,4 @@
-"""Chapter 3 authorization server: authorization-code and refresh grants."""
+"""Chapter 3 authorization server: authorization-code grant only."""
 
 from __future__ import annotations
 
@@ -19,13 +19,7 @@ from urllib.parse import (
 
 from flask import Flask, Response, jsonify, redirect, render_template, request
 
-from oauth_store import (
-    DatabaseError,
-    insert_access_token,
-    insert_refresh_token,
-    reset_schema,
-    rotate_refresh_token,
-)
+from oauth_store import DatabaseError, insert_access_token, reset_schema
 
 
 BASE_DIR = Path(__file__).resolve().parent
@@ -35,6 +29,7 @@ app = Flask(
     static_folder=str(BASE_DIR / "files"),
     static_url_path="/assets",
 )
+
 AUTH_SERVER = {
     "authorization_endpoint": "http://localhost:9001/authorize",
     "token_endpoint": "http://localhost:9001/token",
@@ -43,12 +38,9 @@ CLIENTS = [
     {
         "client_id": "oauth-client-1",
         "client_secret": "oauth-client-secret-1",
-        "redirect_uris": ["http://localhost:9000/callback"],
+        "redirect_uris": "http://localhost:9000/callback",
     }
 ]
-
-# Explicit Exercise 2 fixture recognized before any authorization-code flow.
-PRECONFIGURED_REFRESH_TOKEN = "j2r3oj32r23rmasd98uhjrk2o3i"
 PKCE_VERIFIER_CHARACTERS = frozenset(
     "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
     "abcdefghijklmnopqrstuvwxyz"
@@ -75,7 +67,7 @@ authorization_codes: dict[str, AuthorizationCode] = {}
 
 
 def build_url(base: str, parameters: dict[str, str | None]) -> str:
-    """Add query parameters without discarding those already in the URL."""
+    """Add query parameters without discarding ones already in the URL."""
     parts = urlsplit(base)
     query = dict(parse_qsl(parts.query, keep_blank_values=True))
     query.update(
@@ -207,8 +199,10 @@ def validate_code_verifier(
     return hmac.compare_digest(generated_bytes, expected_bytes)
 
 
-def redirect_error(callback: str, error: str) -> Response:
-    return redirect(build_url(callback, {"error": error}))
+def redirect_error(
+    callback: str, error: str, state: str | None
+) -> Response:
+    return redirect(build_url(callback, {"error": error, "state": state}))
 
 
 @app.get("/")
@@ -227,17 +221,27 @@ def authorize() -> Response | str:
         return render_template("error.html", error="Unknown client"), 400
 
     redirect_uri = request.args.get("redirect_uri")
-    if redirect_uri not in client["redirect_uris"]:
+    if redirect_uri != client["redirect_uris"]:
         return render_template("error.html", error="Invalid redirect URI"), 400
 
     code_challenge = request.args.get("code_challenge")
     challenge_method = request.args.get("code_challenge_method")
     if not validate_code_challenge(code_challenge, challenge_method):
-        return redirect_error(redirect_uri, "invalid_request")
+        return redirect_error(
+            redirect_uri,
+            "invalid_request",
+            request.args.get("state"),
+        )
 
     request_id = secrets.token_urlsafe(18)
     approval_requests[request_id] = request.args.to_dict()
-    return render_template("approve.html", client=client, reqid=request_id)
+    received_state = request.args.get("state")
+    return render_template(
+        "approve.html",
+        client=client,
+        reqid=request_id,
+        state=received_state,
+    )
 
 
 @app.post("/approve")
@@ -249,10 +253,13 @@ def approve() -> Response | str:
         ), 400
 
     callback = saved_request["redirect_uri"]
+    # Send the client's state back unchanged so it can match the response
+    # to the request it made.
+    state = saved_request.get("state")
     if "approve" not in request.form:
-        return redirect_error(callback, "access_denied")
+        return redirect_error(callback, "access_denied", state)
     if saved_request.get("response_type") != "code":
-        return redirect_error(callback, "unsupported_response_type")
+        return redirect_error(callback, "unsupported_response_type", state)
 
     code = secrets.token_urlsafe(24)
     authorization_codes[code] = {
@@ -261,19 +268,19 @@ def approve() -> Response | str:
         "code_challenge": saved_request["code_challenge"],
         "code_challenge_method": saved_request["code_challenge_method"],
     }
-    return redirect(build_url(callback, {"code": code}))
+    return redirect(build_url(callback, {"code": code, "state": state}))
 
 
-def authenticate_client(
-    body: dict[str, Any],
-) -> tuple[dict[str, Any] | None, tuple[Response, int] | None]:
+@app.post("/token")
+def token() -> tuple[Response, int] | Response:
+    body = request_data()
     header_credentials, header_supplied = basic_credentials(
         request.headers.get("Authorization")
     )
     body_supplied = "client_id" in body or "client_secret" in body
     invalid_header = header_supplied and header_credentials is None
     if (header_supplied and body_supplied) or invalid_header:
-        return None, oauth_error("invalid_client", 401)
+        return oauth_error("invalid_client", 401)
 
     credentials = header_credentials
     if not header_supplied and body_supplied:
@@ -291,82 +298,42 @@ def authenticate_client(
             credentials[1].encode("utf-8"),
         )
     ):
-        return None, oauth_error("invalid_client", 401)
-    return client, None
+        return oauth_error("invalid_client", 401)
 
+    if body.get("grant_type") != "authorization_code":
+        return oauth_error("unsupported_grant_type")
 
-@app.post("/token")
-def token() -> tuple[Response, int] | Response:
-    body = request_data()
-    client, authentication_error = authenticate_client(body)
-    if authentication_error:
-        return authentication_error
-    assert client is not None
+    code_value = body.get("code")
+    code = (
+        authorization_codes.get(code_value)
+        if isinstance(code_value, str)
+        else None
+    )
+    if (
+        code is None
+        or code["client_id"] != client["client_id"]
+        or body.get("redirect_uri") != code["redirect_uri"]
+    ):
+        return oauth_error("invalid_grant")
 
-    if body.get("grant_type") == "authorization_code":
-        code_value = body.get("code")
-        code = (
-            authorization_codes.get(code_value)
-            if isinstance(code_value, str)
-            else None
-        )
-        if (
-            code is None
-            or code["client_id"] != client["client_id"]
-            or body.get("redirect_uri") != code["redirect_uri"]
-        ):
-            return oauth_error("invalid_grant")
+    if not validate_code_verifier(
+        body.get("code_verifier"),
+        code["code_challenge"],
+    ):
+        return oauth_error("invalid_grant")
 
-        if not validate_code_verifier(
-            body.get("code_verifier"),
-            code["code_challenge"],
-        ):
-            return oauth_error("invalid_grant")
-
-        del authorization_codes[code_value]
-        access_token = secrets.token_urlsafe(32)
-        try:
-            insert_access_token(access_token, client["client_id"])
-        except DatabaseError:
-            return temporarily_unavailable()
-        return jsonify(
-            access_token=access_token,
-            token_type="Bearer",
-        )
-
-    if body.get("grant_type") == "refresh_token":
-        presented_refresh_token = body.get("refresh_token")
-        if not isinstance(presented_refresh_token, str):
-            return oauth_error("invalid_grant")
-
-        new_access_token = secrets.token_urlsafe(32)
-        new_refresh_token = secrets.token_urlsafe(32)
-        try:
-            rotated_refresh_token = rotate_refresh_token(
-                presented_refresh_token,
-                new_access_token,
-                new_refresh_token,
-                client["client_id"],
-            )
-        except DatabaseError:
-            return temporarily_unavailable()
-        if rotated_refresh_token is None:
-            return oauth_error("invalid_grant")
-
-        return jsonify(
-            access_token=new_access_token,
-            token_type="Bearer",
-            refresh_token=new_refresh_token,
-        )
-
-    return oauth_error("unsupported_grant_type")
+    del authorization_codes[code_value]
+    access_token = secrets.token_urlsafe(32)
+    try:
+        insert_access_token(access_token, client["client_id"])
+    except DatabaseError:
+        return temporarily_unavailable()
+    return jsonify(access_token=access_token, token_type="Bearer")
 
 
 # Match the original authorization-server startup lifecycle: loading the app
-# clears its exercise-local store and registers the documented refresh-token
-# fixture.
+# clears its exercise-local token store before requests are accepted.
 reset_schema()
-insert_refresh_token(PRECONFIGURED_REFRESH_TOKEN, "oauth-client-1")
 
 
 if __name__ == "__main__":

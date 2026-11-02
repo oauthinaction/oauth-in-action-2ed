@@ -18,6 +18,14 @@
     <p class="visually-hidden" data-copy-status aria-live="polite"></p>
     <section class="panel">
       <h1>Protected resource response</h1>
+      <dl>
+        <dt>Name</dt>
+        <dd>{{ resource.name }}</dd>
+        <dt>Description</dt>
+        <dd>{{ resource.description }}</dd>
+        <dt>Timestamp</dt>
+        <dd><span class="token">{{ resource.timestamp }}</span></dd>
+      </dl>
       <div class="copyable-block" data-copy-container>
         <pre data-copy-value
           aria-label="Protected resource JSON">{{ resource | tojson(indent=2) }}</pre>

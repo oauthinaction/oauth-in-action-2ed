@@ -1,0 +1,55 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Protected Resource</title>
+  <link rel="stylesheet" href="/assets/common.css">
+  <script src="/assets/common.js" defer></script>
+</head>
+<body class="resource">
+  <header class="site-header">
+    <div class="header-inner">
+      <a class="brand" href="/">OAuth in Action</a>
+      <span class="service-label">Protected Resource - localhost:9002</span>
+    </div>
+  </header>
+  <main>
+    <p class="visually-hidden" data-copy-status aria-live="polite"></p>
+    <section class="panel">
+      <h1>Protected Resource</h1>
+      <p>
+        This server exposes OAuth-protected data at
+        <span class="copyable-inline" data-copy-container>
+          <code data-copy-value>http://localhost:9002/resource</code>
+          <button class="copy-button" type="button" data-copy-button
+            aria-label="Copy resource endpoint" title="Copy resource endpoint">
+            <span class="copy-icon" aria-hidden="true"></span>
+          </button>
+        </span>.
+      </p>
+      <p>
+        Send a
+        <span class="copyable-inline" data-copy-container>
+          <code data-copy-value>POST</code>
+          <button class="copy-button" type="button" data-copy-button
+            aria-label="Copy request method" title="Copy request method">
+            <span class="copy-icon" aria-hidden="true"></span>
+          </button>
+        </span>
+        request with a valid access token in an
+        <span class="copyable-inline" data-copy-container>
+          <code data-copy-value>Authorization: Bearer</code>
+          <button class="copy-button" type="button" data-copy-button
+            aria-label="Copy Authorization header fragment"
+            title="Copy Authorization header fragment">
+            <span class="copy-icon" aria-hidden="true"></span>
+          </button>
+        </span>
+        header. The Chapter 3 client performs this request server-to-server,
+        so browser CORS support is not needed.
+      </p>
+    </section>
+  </main>
+</body>
+</html>

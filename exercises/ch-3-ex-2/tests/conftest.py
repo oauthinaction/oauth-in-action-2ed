@@ -84,19 +84,13 @@ def resource_http():
 
 @pytest.fixture(autouse=True)
 def isolated_runtime(tmp_path, monkeypatch):
-    CLIENT.code_verifier = None
-    CLIENT.access_token = CLIENT.INITIAL_ACCESS_TOKEN
-    CLIENT.refresh_token = CLIENT.INITIAL_REFRESH_TOKEN
-    CLIENT.last_refresh_epoch = None
+    for name in ("state", "code_verifier", "access_token"):
+        setattr(CLIENT, name, None)
     AUTHORIZATION_SERVER.approval_requests.clear()
     AUTHORIZATION_SERVER.authorization_codes.clear()
 
     monkeypatch.setattr(STORE, "DB_PATH", tmp_path / "oauth.sqlite3")
     STORE.reset_schema()
-    STORE.insert_refresh_token(
-        AUTHORIZATION_SERVER.PRECONFIGURED_REFRESH_TOKEN,
-        "oauth-client-1",
-    )
     guarded_post = Mock(
         side_effect=AssertionError(
             "Unexpected real requests.post attempt; "
@@ -106,10 +100,8 @@ def isolated_runtime(tmp_path, monkeypatch):
     monkeypatch.setattr(CLIENT.requests, "post", guarded_post)
     yield guarded_post
 
-    CLIENT.code_verifier = None
-    CLIENT.access_token = CLIENT.INITIAL_ACCESS_TOKEN
-    CLIENT.refresh_token = CLIENT.INITIAL_REFRESH_TOKEN
-    CLIENT.last_refresh_epoch = None
+    for name in ("state", "code_verifier", "access_token"):
+        setattr(CLIENT, name, None)
     AUTHORIZATION_SERVER.approval_requests.clear()
     AUTHORIZATION_SERVER.authorization_codes.clear()
 
