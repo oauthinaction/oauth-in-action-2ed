@@ -394,3 +394,33 @@ def test_concurrent_code_redemption_issues_exactly_one_owner_bound_pair(
             "resource_owner": "bob",
         }
     ]
+
+
+def test_refresh_grant_prints_the_tokens_it_uses(
+    authorization_http, oauth_store, capsys
+):
+    oauth_store.issue_token_pair(
+        "old-access", "old-refresh", CLIENT_ID, "music", "alice"
+    )
+    form = {"grant_type": "refresh_token", "refresh_token": "old-refresh"}
+
+    response = authorization_http.post(
+        "/token", data=form, headers=basic_headers()
+    )
+    body = response.get_json()
+    console = capsys.readouterr().out
+
+    assert response.status_code == 200
+    assert "We found a matching refresh token: old-refresh" in console, (
+        "Print the refresh token the client presented"
+    )
+    assert (
+        f"Issuing access token {body['access_token']} and refresh token "
+        f"{body['refresh_token']} for refresh token old-refresh"
+    ) in console, "Print the new access and refresh tokens that replace it"
+
+    replay = authorization_http.post(
+        "/token", data=form, headers=basic_headers()
+    )
+    assert replay.status_code == 400
+    assert "No matching token was found." in capsys.readouterr().out

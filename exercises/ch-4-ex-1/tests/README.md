@@ -25,14 +25,16 @@ Only HTTP status 200 counts as success, for the token endpoint and for the prote
 
 The authorization server registers a single `redirect_uris` string and shows the received `state` on the approval page, with a copy control, or a red NONE when the client sent no state.
 
+During a refresh, the authorization server's console prints "We found a matching refresh token: …" and "Issuing access token … and refresh token … for refresh token …", or "No matching token was found." when the refresh token is unknown or already used. Printing token values is a teaching shortcut; a real server must never log them.
+
 ## Expected learning-state result
 
-The untouched root starter is intentionally incomplete only in `protectedResource.py`. Expect exactly two grouped failures, `2 failed, 63 passed, 1 skipped`:
+The untouched root starter is intentionally incomplete only in `protectedResource.py`. Expect exactly two grouped failures, `2 failed, 64 passed, 1 skipped`:
 
 1. `test_milestone_strict_token_extraction_precedence`: strict access-token extraction (`Authorization` header first, then an optional form-body token; query-string tokens are always ignored).
 2. `test_milestone_exact_stored_token_validation_and_oauth_errors`: implement `validated_access_record()` for exact SQLite lookup and structured challenged 401 or retryable 503 errors, then wire `/resource` to return data only when that helper returns a valid record. A `(None, None)` helper result must fail closed with `401 invalid_token`, never an assertion-driven 500.
 
-The end-to-end issued-token/resource check (`test_issued_token_reaches_resource_when_milestones_are_complete`) is skipped while the starter returns its explicit 501 milestone response. All client, authorization-server, store, and infrastructure tests pass. Each grouped failure reports all mismatched cases so one early assertion does not hide the rest. With `completed/protectedResource.py` copied over the root file, the suite reports `66 passed` with no failures and no skip.
+The end-to-end issued-token/resource check (`test_issued_token_reaches_resource_when_milestones_are_complete`) is skipped while the starter returns its explicit 501 milestone response. All client, authorization-server, store, and infrastructure tests pass. Each grouped failure reports all mismatched cases so one early assertion does not hide the rest. With `completed/protectedResource.py` copied over the root file, the suite reports `67 passed` with no failures and no skip.
 
 ## Manual same-tree troubleshooting
 

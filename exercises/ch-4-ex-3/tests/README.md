@@ -10,6 +10,8 @@ Each click on "Get produce for the current grant" sends one `GET http://localhos
 
 Refreshing is button-driven: the "Refresh token" button posts to `POST /refresh` (GET returns 405). A successful refresh stores the rotated tokens and scope, records the time in the Last refresh row, and redirects to `/` with 303. A second refresh within 20 seconds shows a wait message instead. A failed refresh clears the refresh token and keeps the previous Last refresh time.
 
+During a refresh, the authorization server's console prints "We found a matching refresh token: …" and "Issuing access token … and refresh token … for refresh token …", or "No matching token was found." when the refresh token is unknown or already used. Printing token values is a teaching shortcut; a real server must never log them.
+
 ## Root-only boundary
 
 The suite explicitly loads only these files from the exercise root by exact path:
@@ -40,7 +42,7 @@ The test dependency is pinned to `pytest==9.1.1`. Runtime dependencies are pinne
 
 ## Expected results
 
-The untouched root intentionally has **one failing test** (`1 failed, 68 passed`):
+The untouched root intentionally has **one failing test** (`1 failed, 69 passed`):
 
 ```text
 tests/test_resource.py::test_scope_filtering_milestone_exactly_matches_each_valid_token_grant
@@ -48,7 +50,7 @@ tests/test_resource.py::test_scope_filtering_milestone_exactly_matches_each_vali
 
 That single aggregated milestone explains every missing filtering case without turning one learner task into many failures. All client, authorization-server, store, and other resource tests pass. A valid access token must always receive HTTP 200 and exactly the `fruit`, `veggies`, and `meats` keys. No scope means three empty lists; each singleton or partial grant populates only matching categories; all three scopes return all values; names such as `fruitful` must not match `fruit`; a valid token is never rejected with 403.
 
-With the answer key copied over the root (`completed/protectedResource.py` → `protectedResource.py`), the complete suite passes (`69 passed`).
+With the answer key copied over the root (`completed/protectedResource.py` → `protectedResource.py`), the complete suite passes (`70 passed`).
 
 ## Troubleshooting
 

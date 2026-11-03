@@ -26,6 +26,8 @@ The client sends a fresh random `state` with every authorization request and rej
 
 Only the exact success status counts: 200 from the token endpoint and from a Words API GET, 201 from a POST, and 204 from a DELETE. Any other status clears the access token. A 401 is reported on the client page with a notice, and the client never refreshes automatically: the user clicks **Refresh token** (a POST to `/refresh`), which is refused for 20 seconds after the last successful refresh and records the Last refresh time. A 401 within those 20 seconds is reported as not being a freshness problem. Connection errors are rendered as client errors, never as HTTP 500.
 
+During a refresh, the authorization server's console prints "We found a matching refresh token: …" and "Issuing access token … and refresh token … for refresh token …", or "No matching token was found." when the refresh token is unknown or already used. Printing token values is a teaching shortcut; a real server must never log them.
+
 ## Isolation and expected milestones
 
 Every test gets a newly reset SQLite database under pytest's temporary directory. Client token, state, scope, and last-refresh values, authorization approval/code dictionaries, and resource `SAVED_WORDS` are reset before and after every test. `requests.get`, `requests.post`, and `requests.delete` are fail-closed mocks, so the suite never contacts live services on ports 9000, 9001, or 9002.
@@ -44,8 +46,8 @@ The verified progression is:
 
 | Stage | Result |
 | --- | --- |
-| Untouched Exercise 2 starter | `109 passed, 3 failed` |
-| Completed scope checks | `112 passed` |
+| Untouched Exercise 2 starter | `110 passed, 3 failed` |
+| Completed scope checks | `113 passed` |
 
 There are no prerequisite skips because Exercise 2 begins with Exercise 1's authentication work already complete. The final goal is an all-green suite.
 
