@@ -18,24 +18,13 @@ def generate_test_code_challenge(code_verifier):
     return base64url_digest.decode("ascii").rstrip("=")
 
 
-def oauth_response(status=200, payload=None, raw_body=None):
+def oauth_response(status=200, payload=None):
     response = requests.Response()
     response.status_code = status
     response.url = "https://test.invalid/oauth"
     response.headers["Content-Type"] = "application/json"
-    if raw_body is not None:
-        response._content = raw_body
-    else:
-        response._content = json.dumps(payload).encode("utf-8")
+    response._content = json.dumps(payload).encode("utf-8")
     return response
-
-
-def malformed_json_response(status=200):
-    return oauth_response(status=status, raw_body=b'{"access_token":')
-
-
-def non_object_json_response(status=200):
-    return oauth_response(status=status, payload=["not", "an", "object"])
 
 
 def oauth_form_headers(client_id, client_secret):
@@ -59,8 +48,6 @@ def redirect_query(response):
 def issue_authorization_code(
     authorization_http,
     authorization_server,
-    scope=None,
-    state="test-state",
     code_challenge=TEST_CODE_CHALLENGE,
     code_challenge_method="S256",
 ):
@@ -68,10 +55,7 @@ def issue_authorization_code(
         "response_type": "code",
         "client_id": "oauth-client-1",
         "redirect_uri": "http://localhost:9000/callback",
-        "state": state,
     }
-    if scope is not None:
-        query["scope"] = scope
     if code_challenge is not None:
         query["code_challenge"] = code_challenge
     if code_challenge_method is not None:
@@ -79,12 +63,11 @@ def issue_authorization_code(
 
     response = authorization_http.get("/authorize", query_string=query)
     assert response.status_code == 200, (
-        "Authorization setup failed before the code milestone could be exercised"
+        "Authorization setup failed before the code milestone "
+        "could be exercised"
     )
     request_id = next(iter(authorization_server.approval_requests))
     approval = {"reqid": request_id, "approve": "Approve"}
-    for item in (scope or "").split():
-        approval[f"scope_{item}"] = item
     response = authorization_http.post("/approve", data=approval)
     parsed, params = redirect_query(response)
     assert response.status_code == 302 and "code" in params, (

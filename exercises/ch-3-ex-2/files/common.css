@@ -136,107 +136,6 @@ code,
   word-break: break-word;
 }
 
-ul.clean {
-  padding: 0;
-  list-style: none;
-}
-
-.scope-option {
-  display: flex;
-  align-items: center;
-  gap: .6rem;
-  margin: .55rem 0;
-}
-
-.scope-option input {
-  width: 1.15rem;
-  height: 1.15rem;
-}
-
-.actions {
-  display: flex;
-  flex-wrap: wrap;
-  gap: .7rem;
-  margin-top: 1.25rem;
-}
-
-.button {
-  display: inline-block;
-  padding: .65rem 1rem;
-  border: 2px solid transparent;
-  border-radius: .4rem;
-  font: inherit;
-  font-weight: 700;
-  text-decoration: none;
-  cursor: pointer;
-}
-
-.button-primary {
-  color: #fff;
-  background: #1559a5;
-}
-
-.button-approve {
-  color: #fff;
-  background: #18743a;
-}
-
-.button-deny {
-  color: #fff;
-  background: #a12626;
-}
-
-.button-secondary {
-  color: #172033;
-  background: #e5eaf2;
-}
-
-.error {
-  border-left: .35rem solid #b42318;
-}
-
-pre {
-  margin: 0;
-  padding: 1rem;
-  overflow: auto;
-  overflow-wrap: anywhere;
-  border: 1px solid #c4cad4;
-  border-radius: .5rem;
-  color: #172033;
-  background: #f4f6f9;
-  white-space: pre-wrap;
-}
-
-.muted {
-  color: #586579;
-}
-
-@media (max-width: 38rem) {
-  .header-inner {
-    flex-direction: column;
-    align-items: flex-start;
-    gap: .2rem;
-  }
-
-  dl {
-    grid-template-columns: 1fr;
-    gap: .2rem;
-  }
-
-  dd {
-    margin-bottom: .65rem;
-  }
-
-  .actions {
-    flex-direction: column;
-  }
-
-  .button {
-    width: 100%;
-    text-align: center;
-  }
-}
-
 .copyable-inline {
   display: inline-flex;
   max-width: 100%;
@@ -333,6 +232,91 @@ pre {
   font-weight: 700;
 }
 
-.scope-option {
+ul.clean {
+  padding: 0;
+  list-style: none;
+}
+
+.actions {
+  display: flex;
   flex-wrap: wrap;
+  gap: .7rem;
+  margin-top: 1.25rem;
+}
+
+.button {
+  display: inline-block;
+  padding: .65rem 1rem;
+  border: 2px solid transparent;
+  border-radius: .4rem;
+  font: inherit;
+  font-weight: 700;
+  text-decoration: none;
+  cursor: pointer;
+}
+
+.button-primary {
+  color: #fff;
+  background: #1559a5;
+}
+
+.button-approve {
+  color: #fff;
+  background: #18743a;
+}
+
+.button-deny {
+  color: #fff;
+  background: #a12626;
+}
+
+.button-secondary {
+  color: #172033;
+  background: #e5eaf2;
+}
+
+.error {
+  border-left: .35rem solid #b42318;
+}
+
+pre {
+  margin: 0;
+  padding: 1rem;
+  overflow: auto;
+  overflow-wrap: anywhere;
+  border: 1px solid #c4cad4;
+  border-radius: .5rem;
+  color: #172033;
+  background: #f4f6f9;
+  white-space: pre-wrap;
+}
+
+.muted {
+  color: #586579;
+}
+
+@media (max-width: 38rem) {
+  .header-inner {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: .2rem;
+  }
+
+  dl {
+    grid-template-columns: 1fr;
+    gap: .2rem;
+  }
+
+  dd {
+    margin-bottom: .65rem;
+  }
+
+  .actions {
+    flex-direction: column;
+  }
+
+  .button {
+    width: 100%;
+    text-align: center;
+  }
 }

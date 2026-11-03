@@ -1,7 +1,8 @@
 """Chapter 3 protected resource backed by the shared SQLite token store."""
 
-import re
 from pathlib import Path
+import re
+import time
 
 from flask import Flask, Response, jsonify, render_template, request
 
@@ -19,7 +20,10 @@ RESOURCE = {
     "name": "Protected Resource",
     "description": "This data has been protected by OAuth 2.0",
 }
-BEARER_PATTERN = re.compile(r"^Bearer ([A-Za-z0-9\-._~+/]+={0,2})$", re.IGNORECASE)
+BEARER_PATTERN = re.compile(
+    r"^Bearer ([A-Za-z0-9\-._~+/]+={0,2})$",
+    re.IGNORECASE,
+)
 
 
 def incoming_access_token() -> str | None:
@@ -51,7 +55,12 @@ def resource() -> Response | tuple[Response, int]:
         except DatabaseError:
             return temporarily_unavailable()
         if access_record:
-            return jsonify(RESOURCE)
+            resource_body = {
+                "name": RESOURCE["name"],
+                "description": RESOURCE["description"],
+                "timestamp": int(time.time()),
+            }
+            return jsonify(resource_body)
     response = jsonify(error="invalid_token")
     response.headers["WWW-Authenticate"] = 'Bearer realm="protected-resource"'
     return response, 401

@@ -45,20 +45,34 @@ def test_server_pkce_helpers_match_rfc_7636(authorization_server):
         TEST_CODE_VERIFIER,
         TEST_CODE_CHALLENGE,
     )
-    for invalid_verifier in (None, "short", "a" * 129, "a" * 42 + "!", "é" * 43):
-        assert authorization_server.generate_code_challenge(invalid_verifier) is None
+    for invalid_verifier in (
+        None,
+        "short",
+        "a" * 129,
+        "a" * 42 + "!",
+        "é" * 43,
+    ):
+        assert (
+            authorization_server.generate_code_challenge(invalid_verifier)
+            is None
+        )
     assert not authorization_server.validate_code_challenge(
         TEST_CODE_CHALLENGE,
         "plain",
     )
-    assert not authorization_server.validate_code_challenge("invalid=challenge", "S256")
+    assert not authorization_server.validate_code_challenge(
+        "invalid=challenge",
+        "S256",
+    )
     assert not authorization_server.validate_code_verifier(
         "x" * 43,
         TEST_CODE_CHALLENGE,
     )
 
 
-def test_server_rejects_non_canonical_base64url_challenge(authorization_server):
+def test_server_rejects_non_canonical_base64url_challenge(
+    authorization_server,
+):
     assert not authorization_server.validate_code_challenge(
         "A" * 42 + "B",
         "S256",
@@ -74,18 +88,20 @@ def test_code_grant_persists_token_and_resource_accepts_it(
     code, _, _ = issue_authorization_code(
         authorization_http,
         authorization_server,
-        scope="foo",
     )
     token_response = redeem_code(authorization_http, code)
     payload = token_response.get_json()
     assert token_response.status_code == 200 and payload["access_token"], (
         "Exchange an approved authorization code for a non-empty access token"
     )
+    assert payload.keys() == {"access_token", "token_type"}, (
+        "Chapter 3 token responses contain only the access token and its type"
+    )
+    assert payload["token_type"] == "Bearer"
     stored = oauth_store.find_access_token(payload["access_token"])
     assert stored == {
         "access_token": payload["access_token"],
         "client_id": CLIENT_ID,
-        "scope": "foo",
     }, "Persist the access token so the protected resource can validate it"
 
     resource_response = resource_http.post(
@@ -96,25 +112,35 @@ def test_code_grant_persists_token_and_resource_accepts_it(
     assert resource_response.get_json()["name"] == "Protected Resource"
 
 
-def test_unknown_client_and_bad_redirect_are_local_400_errors(authorization_http):
+def test_unknown_client_and_bad_redirect_are_local_400_errors(
+    authorization_http,
+):
     cases = (
-        ({"client_id": "unknown", "redirect_uri": REDIRECT_URI}, b"Unknown client"),
         (
-            {"client_id": CLIENT_ID, "redirect_uri": "https://attacker.invalid/callback"},
+            {"client_id": "unknown", "redirect_uri": REDIRECT_URI},
+            b"Unknown client",
+        ),
+        (
+            {
+                "client_id": CLIENT_ID,
+                "redirect_uri": "https://attacker.invalid/callback",
+            },
             b"Invalid redirect URI",
         ),
     )
     for query, expected_text in cases:
         response = authorization_http.get("/authorize", query_string=query)
         assert response.status_code == 400, (
-            "Reject unknown clients and unregistered redirects locally before redirecting"
+            "Reject unknown clients and unregistered redirects locally "
+            "before redirecting"
         )
         assert expected_text in response.data
         assert "Location" not in response.headers
 
 
-def test_invalid_scope_uses_only_the_trusted_redirect_and_preserves_state(
+def test_extra_scope_and_state_parameters_are_ignored(
     authorization_http,
+    authorization_server,
 ):
     response = authorization_http.get(
         "/authorize",
@@ -122,15 +148,33 @@ def test_invalid_scope_uses_only_the_trusted_redirect_and_preserves_state(
             "response_type": "code",
             "client_id": CLIENT_ID,
             "redirect_uri": REDIRECT_URI,
-            "scope": "admin",
-            "state": "scope-state",
+            "code_challenge": TEST_CODE_CHALLENGE,
+            "code_challenge_method": "S256",
+            "scope": "foo",
+            "state": "xyz",
         },
     )
-    parsed, params = redirect_query(response)
-    assert response.status_code == 302 and parsed.geturl().startswith(REDIRECT_URI + "?"), (
-        "Return invalid_scope only to a previously validated redirect URI"
+    assert response.status_code == 200, (
+        "Show the approval page even when unsupported scope or state "
+        "values are sent"
     )
-    assert params == {"error": "invalid_scope", "state": "scope-state"}
+    assert b"Approve this client?" in response.data
+
+    request_id = next(iter(authorization_server.approval_requests))
+    approval = authorization_http.post(
+        "/approve",
+        data={"reqid": request_id, "approve": "Approve"},
+    )
+    parsed, params = redirect_query(approval)
+    assert approval.status_code == 302
+    assert parsed.geturl().startswith(REDIRECT_URI + "?")
+    assert params.keys() == {"code"}, (
+        "Redirect with only the authorization code; do not echo a state value"
+    )
+    stored_code = authorization_server.authorization_codes[params["code"]]
+    assert "scope" not in stored_code, (
+        "Chapter 3 authorization codes do not record a scope"
+    )
 
 
 def test_invalid_pkce_authorization_requests_use_trusted_redirect(
@@ -167,16 +211,16 @@ def test_invalid_pkce_authorization_requests_use_trusted_redirect(
             "response_type": "code",
             "client_id": CLIENT_ID,
             "redirect_uri": REDIRECT_URI,
-            "scope": "foo",
-            "state": "pkce-state",
         }
         query.update(pkce_parameters)
         response = authorization_http.get("/authorize", query_string=query)
         parsed, params = redirect_query(response)
 
-        assert response.status_code == 302, f"Reject {description} as invalid_request"
+        assert response.status_code == 302, (
+            f"Reject {description} as invalid_request"
+        )
         assert parsed.geturl().startswith(REDIRECT_URI + "?")
-        assert params == {"error": "invalid_request", "state": "pkce-state"}
+        assert params == {"error": "invalid_request"}
         assert not authorization_server.approval_requests, (
             "Do not save an approval request until PKCE parameters are valid"
         )
@@ -189,7 +233,6 @@ def test_approval_request_is_one_use(authorization_http, authorization_server):
             "response_type": "code",
             "client_id": CLIENT_ID,
             "redirect_uri": REDIRECT_URI,
-            "state": "approval-state",
             "code_challenge": TEST_CODE_CHALLENGE,
             "code_challenge_method": "S256",
         },
@@ -204,7 +247,10 @@ def test_approval_request_is_one_use(authorization_http, authorization_server):
         data={"reqid": request_id, "approve": "Approve"},
     )
     assert first.status_code == 302
-    assert second.status_code == 400 and b"No matching authorization request" in second.data, (
+    assert (
+        second.status_code == 400
+        and b"No matching authorization request" in second.data
+    ), (
         "Consume an approval request after its first decision"
     )
 
@@ -223,10 +269,15 @@ def test_bad_client_authentication_returns_json_challenge(authorization_http):
     for headers, extra_data in attempts:
         data = {"grant_type": "authorization_code", "code": "unknown"}
         data.update(extra_data)
-        response = authorization_http.post("/token", data=data, headers=headers)
+        response = authorization_http.post(
+            "/token",
+            data=data,
+            headers=headers,
+        )
         assert response.status_code == 401
         assert response.get_json() == {"error": "invalid_client"}, (
-            "Reject malformed, wrong, or mixed client authentication as invalid_client"
+            "Reject malformed, wrong, or mixed client authentication as "
+            "invalid_client"
         )
         assert response.headers["WWW-Authenticate"] == 'Basic realm="token"'
 
@@ -235,8 +286,15 @@ def test_wrong_redirect_does_not_consume_authorization_code(
     authorization_http,
     authorization_server,
 ):
-    code, _, _ = issue_authorization_code(authorization_http, authorization_server)
-    rejected = redeem_code(authorization_http, code, "https://wrong.invalid/callback")
+    code, _, _ = issue_authorization_code(
+        authorization_http,
+        authorization_server,
+    )
+    rejected = redeem_code(
+        authorization_http,
+        code,
+        "https://wrong.invalid/callback",
+    )
     accepted = redeem_code(authorization_http, code)
     assert rejected.status_code == 400
     assert rejected.get_json() == {"error": "invalid_grant"}
@@ -249,7 +307,10 @@ def test_pkce_failures_do_not_consume_authorization_code(
     authorization_http,
     authorization_server,
 ):
-    code, _, _ = issue_authorization_code(authorization_http, authorization_server)
+    code, _, _ = issue_authorization_code(
+        authorization_http,
+        authorization_server,
+    )
     missing = redeem_code(authorization_http, code, code_verifier=None)
     wrong = redeem_code(authorization_http, code, code_verifier="x" * 43)
     accepted = redeem_code(authorization_http, code)
@@ -259,10 +320,13 @@ def test_pkce_failures_do_not_consume_authorization_code(
         (missing, "missing verifier"),
         (wrong, "wrong verifier"),
     ):
-        assert response.status_code == 400, f"Reject a {description} as invalid_grant"
+        assert response.status_code == 400, (
+            f"Reject a {description} as invalid_grant"
+        )
         assert response.get_json() == {"error": "invalid_grant"}
     assert accepted.status_code == 200, (
-        "A wrong verifier must not consume the code before the correct verifier arrives"
+        "A wrong verifier must not consume the code before the correct "
+        "verifier arrives"
     )
     assert replay.status_code == 400
     assert replay.get_json() == {"error": "invalid_grant"}, (
@@ -270,8 +334,14 @@ def test_pkce_failures_do_not_consume_authorization_code(
     )
 
 
-def test_authorization_code_is_one_use(authorization_http, authorization_server):
-    code, _, _ = issue_authorization_code(authorization_http, authorization_server)
+def test_authorization_code_is_one_use(
+    authorization_http,
+    authorization_server,
+):
+    code, _, _ = issue_authorization_code(
+        authorization_http,
+        authorization_server,
+    )
     first = redeem_code(authorization_http, code)
     second = redeem_code(authorization_http, code)
     assert first.status_code == 200
@@ -281,14 +351,20 @@ def test_authorization_code_is_one_use(authorization_http, authorization_server)
     )
 
 
-def test_resource_accepts_bearer_form_and_query_transports(resource_http, oauth_store):
-    oauth_store.insert_access_token("transport-token", CLIENT_ID, "foo")
+def test_resource_accepts_bearer_form_and_query_transports(
+    resource_http,
+    oauth_store,
+):
+    oauth_store.insert_access_token("transport-token", CLIENT_ID)
     responses = (
         resource_http.post(
             "/resource",
             headers={"Authorization": "Bearer transport-token"},
         ),
-        resource_http.post("/resource", data={"access_token": "transport-token"}),
+        resource_http.post(
+            "/resource",
+            data={"access_token": "transport-token"},
+        ),
         resource_http.post(
             "/resource",
             query_string={"access_token": "transport-token"},
@@ -299,8 +375,11 @@ def test_resource_accepts_bearer_form_and_query_transports(resource_http, oauth_
     )
 
 
-def test_malformed_authorization_header_takes_precedence(resource_http, oauth_store):
-    oauth_store.insert_access_token("valid-fallback", CLIENT_ID, "foo")
+def test_malformed_authorization_header_takes_precedence(
+    resource_http,
+    oauth_store,
+):
+    oauth_store.insert_access_token("valid-fallback", CLIENT_ID)
     response = resource_http.post(
         "/resource",
         data={"access_token": "valid-fallback"},
@@ -309,7 +388,8 @@ def test_malformed_authorization_header_takes_precedence(resource_http, oauth_st
     )
     assert response.status_code == 401
     assert response.get_json() == {"error": "invalid_token"}, (
-        "Do not fall back to weaker token transports after a malformed Authorization header"
+        "Do not fall back to weaker token transports after a malformed "
+        "Authorization header"
     )
     assert response.headers["WWW-Authenticate"] == (
         'Bearer realm="protected-resource"'
@@ -375,7 +455,6 @@ def test_information_pages_expose_expected_copy_controls(
     authorization_values = (
         b"oauth-client-1",
         b"oauth-client-secret-1",
-        b"foo bar",
         b"http://localhost:9000/callback",
         b"http://localhost:9001/authorize",
         b"http://localhost:9001/token",
@@ -384,8 +463,8 @@ def test_information_pages_expose_expected_copy_controls(
     assert authorization_page.status_code == 200
     for value in authorization_values:
         assert value in authorization_page.data
-    assert authorization_page.data.count(b"data-copy-value") == 6
-    assert authorization_page.data.count(b"data-copy-button") == 6
+    assert authorization_page.data.count(b"data-copy-value") == 5
+    assert authorization_page.data.count(b"data-copy-button") == 5
 
     resource_page = resource_http.get("/")
     for value in (
@@ -396,3 +475,43 @@ def test_information_pages_expose_expected_copy_controls(
         assert value in resource_page.data
     assert resource_page.data.count(b"data-copy-value") == 3
     assert resource_page.data.count(b"data-copy-button") == 3
+
+
+def test_resource_success_includes_epoch_timestamp(
+    resource_http,
+    protected_resource,
+    oauth_store,
+    monkeypatch,
+):
+    oauth_store.insert_access_token("timestamp-token", CLIENT_ID)
+    monkeypatch.setattr(protected_resource.time, "time", lambda: 1700000000.9)
+
+    response = resource_http.post(
+        "/resource",
+        headers={"Authorization": "Bearer timestamp-token"},
+    )
+
+    assert response.status_code == 200
+    assert response.get_json() == {
+        "name": "Protected Resource",
+        "description": "This data has been protected by OAuth 2.0",
+        "timestamp": 1700000000,
+    }, "Return the resource with the current time as integer epoch seconds"
+
+
+def test_redirect_uri_must_match_exactly(authorization_http):
+    for near_miss in (
+        "http://localhost:9000/call",
+        "localhost:9000/callback",
+        "http://localhost:9000/callback/extra",
+    ):
+        response = authorization_http.get(
+            "/authorize",
+            query_string={"client_id": CLIENT_ID, "redirect_uri": near_miss},
+        )
+        assert response.status_code == 400, (
+            f"Reject {near_miss}: compare the whole redirect URI, "
+            "not part of it"
+        )
+        assert b"Invalid redirect URI" in response.data
+        assert "Location" not in response.headers

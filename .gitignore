@@ -23,4 +23,4 @@ dist/
 htmlcov/
 
 # Per-exercise generated databases
-exercises/ch-3-ex-*/database.sqlite3
+exercises/ch-*-ex-*/database.sqlite3

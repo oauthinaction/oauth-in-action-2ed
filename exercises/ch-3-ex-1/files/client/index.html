@@ -33,27 +33,10 @@
             <span class="token value-missing">NONE</span>
           {% endif %}
         </dd>
-        <dt>Scope</dt>
-        <dd>
-          {% if scope %}
-            <span class="copyable-inline" data-copy-container>
-              <span class="token" data-copy-value>{{ scope }}</span>
-              <button class="copy-button" type="button" data-copy-button
-                aria-label="Copy scope" title="Copy scope">
-                <span class="copy-icon" aria-hidden="true"></span>
-              </button>
-            </span>
-          {% else %}
-            <span class="token value-missing">NONE</span>
-          {% endif %}
-        </dd>
       </dl>
       <div class="actions">
         <a class="button button-primary" href="/authorize">
           Get an access token
-        </a>
-        <a class="button button-secondary" href="/fetch_resource">
-          Fetch protected resource
         </a>
       </div>
     </section>

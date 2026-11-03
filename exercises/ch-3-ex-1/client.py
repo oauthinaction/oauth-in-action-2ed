@@ -2,13 +2,14 @@
 
 import base64
 import hashlib
-import hmac
 from pathlib import Path
 import secrets
 from typing import Any
 from urllib.parse import parse_qsl, quote_plus, urlencode, urlsplit, urlunsplit
 
-from flask import Flask, Response, redirect, render_template, request
+from flask import Flask, render_template
+# Imported for the learner's TODO routes; unused until they are implemented.
+from flask import Response, redirect, request  # noqa: F401
 import requests
 
 
@@ -28,23 +29,21 @@ AUTH_SERVER = {
 CLIENT = {
     "client_id": "",
     "client_secret": "",
-    "redirect_uris": ["http://localhost:9000/callback"],
+    "redirect_uris": "http://localhost:9000/callback",
 }
 
 PROTECTED_RESOURCE = "http://localhost:9002/resource"
 REQUEST_TIMEOUT = 5
 
-# Deliberate single-user exercise shortcut: all browser users share this state.
-state: str | None = None
+# Deliberate single-user shortcut: all browser users share these values.
 code_verifier: str | None = None
 access_token: str | None = None
-scope: str | None = None
 
 
 def build_url(
     base: str, parameters: dict[str, str], fragment: str | None = None
 ) -> str:
-    """Add options while preserving query parameters already present in a URL."""
+    """Add options while preserving query parameters already in a URL."""
     parts = urlsplit(base)
     query = dict(parse_qsl(parts.query, keep_blank_values=True))
     query.update(parameters)
@@ -70,13 +69,6 @@ def encode_client_credentials(identifier: str, secret: str) -> str:
     return encoded_credentials.decode("ascii")
 
 
-def states_match(expected: str, received: str) -> bool:
-    """Compare state as bytes so arbitrary Unicode input fails safely."""
-    expected_state_bytes = expected.encode("utf-8")
-    received_state_bytes = received.encode("utf-8")
-    return hmac.compare_digest(expected_state_bytes, received_state_bytes)
-
-
 def client_error(message: str, status: int = 200) -> tuple[str, int]:
     return render_template("error.html", error=message), status
 
@@ -87,10 +79,6 @@ def response_json(response: requests.Response) -> dict[str, Any] | None:
     except requests.exceptions.JSONDecodeError:
         return None
     return body if isinstance(body, dict) else None
-
-
-def new_state() -> str:
-    return secrets.token_urlsafe(24)
 
 
 def generate_code_verifier() -> str:
@@ -113,22 +101,19 @@ def todo(message: str) -> tuple[str, int]:
 
 @app.get("/")
 def index() -> str:
-    return render_template("index.html", access_token=access_token, scope=scope)
+    return render_template("index.html", access_token=access_token)
 
 
 @app.get("/authorize")
 def authorize() -> tuple[str, int]:
-    return todo("generate a verifier and build the S256 authorization redirect.")
+    return todo(
+        "generate a verifier and build the S256 authorization redirect."
+    )
 
 
 @app.get("/callback")
 def callback() -> tuple[str, int]:
-    return todo("validate state and exchange the code with the PKCE verifier.")
-
-
-@app.get("/fetch_resource")
-def fetch_resource() -> tuple[str, int]:
-    return todo("send the access token to the protected resource.")
+    return todo("exchange the code with the PKCE verifier.")
 
 
 if __name__ == "__main__":

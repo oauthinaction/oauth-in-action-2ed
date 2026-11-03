@@ -1,4 +1,4 @@
-"""Small SQLite token store shared by the authorization and resource servers."""
+"""Small SQLite token store shared by authorization and resource servers."""
 
 from pathlib import Path
 from typing import TypedDict
@@ -20,13 +20,11 @@ SQLITE_BUSY_TIMEOUT_MS = int(SQLITE_TIMEOUT_SECONDS * 1000)
 class AccessToken(TypedDict):
     access_token: str
     client_id: str
-    scope: str
 
 
 class RefreshToken(TypedDict):
     refresh_token: str
     client_id: str
-    scope: str
 
 
 def _connect() -> sqlite3.Connection:
@@ -43,13 +41,11 @@ def initialize_schema() -> None:
             """
             CREATE TABLE IF NOT EXISTS access_tokens (
                 access_token TEXT PRIMARY KEY,
-                client_id TEXT NOT NULL,
-                scope TEXT NOT NULL
+                client_id TEXT NOT NULL
             );
             CREATE TABLE IF NOT EXISTS refresh_tokens (
                 refresh_token TEXT PRIMARY KEY,
-                client_id TEXT NOT NULL,
-                scope TEXT NOT NULL
+                client_id TEXT NOT NULL
             );
             """
         )
@@ -64,26 +60,24 @@ def reset_schema() -> None:
             DROP TABLE IF EXISTS refresh_tokens;
             CREATE TABLE access_tokens (
                 access_token TEXT PRIMARY KEY,
-                client_id TEXT NOT NULL,
-                scope TEXT NOT NULL
+                client_id TEXT NOT NULL
             );
             CREATE TABLE refresh_tokens (
                 refresh_token TEXT PRIMARY KEY,
-                client_id TEXT NOT NULL,
-                scope TEXT NOT NULL
+                client_id TEXT NOT NULL
             );
             """
         )
 
 
-def insert_refresh_token(refresh_token: str, client_id: str, scope: str) -> None:
-    """Store a refresh token for later exchanges."""
+def seed_refresh_token(refresh_token: str, client_id: str) -> None:
+    """Insert or replace a refresh token used by an exercise."""
     initialize_schema()
     with _connect() as connection:
         connection.execute(
-            """INSERT INTO refresh_tokens (refresh_token, client_id, scope)
-               VALUES (?, ?, ?)""",
-            (refresh_token, client_id, scope),
+            """INSERT OR REPLACE INTO refresh_tokens
+               (refresh_token, client_id) VALUES (?, ?)""",
+            (refresh_token, client_id),
         )
 
 
@@ -92,21 +86,21 @@ def find_refresh_token(refresh_token: str) -> RefreshToken | None:
     initialize_schema()
     with _connect() as connection:
         row = connection.execute(
-            """SELECT refresh_token, client_id, scope FROM refresh_tokens
+            """SELECT refresh_token, client_id FROM refresh_tokens
                WHERE refresh_token = ?""",
             (refresh_token,),
         ).fetchone()
     return RefreshToken(**dict(row)) if row else None
 
 
-def insert_access_token(access_token: str, client_id: str, scope: str) -> None:
-    """Store a non-expiring access token for resource-server validation."""
+def insert_access_token(access_token: str, client_id: str) -> None:
+    """Store an access token for resource-server validation."""
     initialize_schema()
     with _connect() as connection:
         connection.execute(
-            """INSERT INTO access_tokens (access_token, client_id, scope)
-               VALUES (?, ?, ?)""",
-            (access_token, client_id, scope),
+            """INSERT INTO access_tokens (access_token, client_id)
+               VALUES (?, ?)""",
+            (access_token, client_id),
         )
 
 
@@ -115,49 +109,8 @@ def find_access_token(access_token: str) -> AccessToken | None:
     initialize_schema()
     with _connect() as connection:
         row = connection.execute(
-            """SELECT access_token, client_id, scope FROM access_tokens
+            """SELECT access_token, client_id FROM access_tokens
                WHERE access_token = ?""",
             (access_token,),
         ).fetchone()
     return AccessToken(**dict(row)) if row else None
-
-
-def rotate_refresh_token(
-    presented_refresh_token: str,
-    new_access_token: str,
-    new_refresh_token: str,
-    client_id: str,
-) -> RefreshToken | None:
-    """Atomically consume a refresh token and persist its replacements."""
-    initialize_schema()
-    with _connect() as connection:
-        connection.execute("BEGIN IMMEDIATE")
-        row = connection.execute(
-            """SELECT refresh_token, client_id, scope FROM refresh_tokens
-               WHERE refresh_token = ? AND client_id = ?""",
-            (presented_refresh_token, client_id),
-        ).fetchone()
-        if row is None:
-            return None
-
-        scope = row["scope"]
-        connection.execute(
-            "DELETE FROM refresh_tokens WHERE refresh_token = ?",
-            (presented_refresh_token,),
-        )
-        connection.execute(
-            """INSERT INTO access_tokens (access_token, client_id, scope)
-               VALUES (?, ?, ?)""",
-            (new_access_token, client_id, ""),
-        )
-        connection.execute(
-            """INSERT INTO refresh_tokens (refresh_token, client_id, scope)
-               VALUES (?, ?, ?)""",
-            (new_refresh_token, client_id, scope),
-        )
-
-    return RefreshToken(
-        refresh_token=new_refresh_token,
-        client_id=client_id,
-        scope=scope,
-    )

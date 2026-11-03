@@ -33,34 +33,6 @@
             <span class="token value-missing">NONE</span>
           {% endif %}
         </dd>
-        <dt>Scope</dt>
-        <dd>
-          {% if scope %}
-            <span class="copyable-inline" data-copy-container>
-              <span class="token" data-copy-value>{{ scope }}</span>
-              <button class="copy-button" type="button" data-copy-button
-                aria-label="Copy scope" title="Copy scope">
-                <span class="copy-icon" aria-hidden="true"></span>
-              </button>
-            </span>
-          {% else %}
-            <span class="token value-missing">NONE</span>
-          {% endif %}
-        </dd>
-        <dt>Refresh token</dt>
-        <dd>
-          {% if refresh_token %}
-            <span class="copyable-inline" data-copy-container>
-              <span class="token" data-copy-value>{{ refresh_token }}</span>
-              <button class="copy-button" type="button" data-copy-button
-                aria-label="Copy refresh token" title="Copy refresh token">
-                <span class="copy-icon" aria-hidden="true"></span>
-              </button>
-            </span>
-          {% else %}
-            <span class="token value-missing">NONE</span>
-          {% endif %}
-        </dd>
       </dl>
       <div class="actions">
         <a class="button button-primary" href="/authorize">

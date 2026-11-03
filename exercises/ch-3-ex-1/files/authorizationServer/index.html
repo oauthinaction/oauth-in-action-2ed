@@ -44,28 +44,15 @@
               </button>
             </span>
           </dd>
-          <dt>Allowed scope</dt>
+          <dt>Redirect URI</dt>
           <dd>
             <span class="copyable-inline" data-copy-container>
-              <code data-copy-value>{{ client.scope }}</code>
+              <code data-copy-value>{{ client.redirect_uris }}</code>
               <button class="copy-button" type="button" data-copy-button
-                aria-label="Copy allowed scope" title="Copy allowed scope">
+                aria-label="Copy redirect URI" title="Copy redirect URI">
                 <span class="copy-icon" aria-hidden="true"></span>
               </button>
             </span>
-          </dd>
-          <dt>Redirect URIs</dt>
-          <dd>
-            {% for uri in client.redirect_uris %}
-              <span class="copyable-inline" data-copy-container>
-                <code data-copy-value>{{ uri }}</code>
-                <button class="copy-button" type="button" data-copy-button
-                  aria-label="Copy redirect URI" title="Copy redirect URI">
-                  <span class="copy-icon" aria-hidden="true"></span>
-                </button>
-              </span>
-              {% if not loop.last %}<br>{% endif %}
-            {% endfor %}
           </dd>
         </dl>
       {% endfor %}
