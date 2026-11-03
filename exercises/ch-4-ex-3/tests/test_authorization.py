@@ -502,3 +502,27 @@ def test_refresh_rotation_collision_rolls_back_all_changes(
     assert oauth_store.find_access_token("candidate-access") is None
     collision_record = oauth_store.find_refresh_token("collision-refresh")
     assert collision_record["client_id"] == "other-client"
+
+
+def test_refresh_grant_prints_the_tokens_it_uses(
+    authorization_http, oauth_store, capsys
+):
+    oauth_store.insert_refresh_token("old-refresh", CLIENT_ID, "fruit")
+    form = {"grant_type": "refresh_token", "refresh_token": "old-refresh"}
+
+    response = token_request(authorization_http, form)
+    body = response.get_json()
+    console = capsys.readouterr().out
+
+    assert response.status_code == 200
+    assert "We found a matching refresh token: old-refresh" in console, (
+        "Print the refresh token the client presented"
+    )
+    assert (
+        f"Issuing access token {body['access_token']} and refresh token "
+        f"{body['refresh_token']} for refresh token old-refresh"
+    ) in console, "Print the new access and refresh tokens that replace it"
+
+    replay = token_request(authorization_http, form)
+    assert replay.status_code == 400
+    assert "No matching token was found." in capsys.readouterr().out

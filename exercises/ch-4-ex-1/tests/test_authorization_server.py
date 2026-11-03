@@ -375,3 +375,28 @@ def test_concurrent_code_redemption_issues_exactly_one_persisted_pair(
             "SELECT COUNT(*) FROM refresh_tokens"
         ).fetchone()[0]
     assert (access_count, refresh_count) == (1, 1)
+
+
+def test_refresh_grant_prints_the_tokens_it_uses(
+    authorization_http, oauth_store, capsys
+):
+    oauth_store.issue_token_pair("access-1", "refresh-1", CLIENT_ID, "")
+    form = {"grant_type": "refresh_token", "refresh_token": "refresh-1"}
+    headers = basic_header(CLIENT_ID, CLIENT_SECRET)
+
+    response = authorization_http.post("/token", data=form, headers=headers)
+    body = response.get_json()
+    console = capsys.readouterr().out
+
+    assert response.status_code == 200
+    assert "We found a matching refresh token: refresh-1" in console, (
+        "Print the refresh token the client presented"
+    )
+    assert (
+        f"Issuing access token {body['access_token']} and refresh token "
+        f"{body['refresh_token']} for refresh token refresh-1"
+    ) in console, "Print the new access and refresh tokens that replace it"
+
+    replay = authorization_http.post("/token", data=form, headers=headers)
+    assert replay.status_code == 400
+    assert "No matching token was found." in capsys.readouterr().out

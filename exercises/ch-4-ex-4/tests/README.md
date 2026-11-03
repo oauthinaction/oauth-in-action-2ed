@@ -10,6 +10,8 @@ Only HTTP status 200 counts as success, for the token endpoint and for the Favor
 
 The client never refreshes automatically. The user clicks the "Refresh token" button (`POST /refresh`), which rotates the token pair, records the Last refresh time, and redirects back to the client page with 303. Another refresh is blocked for 20 seconds with a "You need to wait N seconds" notice. A 401 within those 20 seconds explains that the fresh token was rejected and that this is not a freshness problem.
 
+During a refresh, the authorization server's console prints "We found a matching refresh token: …" and "Issuing access token … and refresh token … for refresh token …", or "No matching token was found." when the refresh token is unknown or already used. Printing token values is a teaching shortcut; a real server must never log them.
+
 ## Run the suite
 
 From this exact exercise directory, create a Python 3.14 environment and install both runtime and test dependencies:
@@ -28,13 +30,13 @@ The test dependency is pinned to `pytest==9.1.1`. The exercise runtime requireme
 
 The suite explicitly imports only these files from the exercise root: `oauth_store.py`, `authorizationServer.py`, `client.py`, and `protectedResource.py`. It never imports or executes `completed/protectedResource.py`; `completed/` is an answer key, not test input. Run pytest from this exercise tree so similarly named modules from another chapter or checkout cannot mask the learner's work.
 
-On the untouched starter, the expected result is **one clear grouped failure** (`1 failed, 70 passed`):
+On the untouched starter, the expected result is **one clear grouped failure** (`1 failed, 71 passed`):
 
 ```text
 test_root_learner_owner_selection_returns_exact_alice_and_bob_fixtures
 ```
 
-That milestone asks the root `protectedResource.py` to inspect the already validated `access_record["resource_owner"]`, return the exact Alice fixture for `alice`, the exact Bob fixture for `bob`, and the explicit empty Unknown fixture otherwise. The corrected Alice movie title is `The Multidimensional Vector`. Once that single TODO is implemented, the full suite should pass. Copying `completed/protectedResource.py` over the root file in a temporary copy of this folder gives `71 passed`.
+That milestone asks the root `protectedResource.py` to inspect the already validated `access_record["resource_owner"]`, return the exact Alice fixture for `alice`, the exact Bob fixture for `bob`, and the explicit empty Unknown fixture otherwise. The corrected Alice movie title is `The Multidimensional Vector`. Once that single TODO is implemented, the full suite should pass. Copying `completed/protectedResource.py` over the root file in a temporary copy of this folder gives `72 passed`.
 
 The authorization page's Alice/Bob selector is intentionally insecure. It is a visible exercise fixture for demonstrating owner propagation, **not authentication** and not a production design. The owner must come only from a validated approval selection, be bound to the authorization code, and then be read from persisted access/refresh records. Request query values, headers, token-request owner fields, display names, and scope must never choose or override an owner.
 
