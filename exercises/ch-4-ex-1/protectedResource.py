@@ -25,7 +25,7 @@ RESOURCE = {
     "description": "This data has been protected by OAuth 2.0",
 }
 BEARER_PATTERN = re.compile(
-    r"^Bearer ([A-Za-z0-9\-._~+/]+={0,2})$",
+    r"^bearer ([A-Za-z0-9\-._~+/]+={0,2})$",
     re.IGNORECASE,
 )
 OAuthError = tuple[Response, int]
@@ -36,11 +36,10 @@ def incoming_access_token() -> str | None:
     # TODO: Treat a present Authorization header as authoritative. Flask and
     # Werkzeug resolve that HTTP field name case-insensitively; accept only a
     # complete, case-insensitive Bearer scheme while preserving the token's
-    # case-sensitive value. When the header is absent, read the access_token
-    # form field into a named variable, return it only when non-empty, and
-    # otherwise return None. Never accept access tokens from the query string
-    # because URLs can leak through logs, browser history, referrer headers,
-    # screenshots, and copied links.
+    # case-sensitive value. When the header is absent, return the
+    # access_token form field (None when it is missing). Never accept access
+    # tokens from the query string because URLs can leak through logs,
+    # browser history, referrer headers, screenshots, and copied links.
     return None
 
 

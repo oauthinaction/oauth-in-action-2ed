@@ -30,13 +30,13 @@ The test dependency is pinned to `pytest==9.1.1`. The exercise runtime requireme
 
 The suite explicitly imports only these files from the exercise root: `oauth_store.py`, `authorizationServer.py`, `client.py`, and `protectedResource.py`. It never imports or executes `completed/protectedResource.py`; `completed/` is an answer key, not test input. Run pytest from this exercise tree so similarly named modules from another chapter or checkout cannot mask the learner's work.
 
-On the untouched starter, the expected result is **one clear grouped failure** (`1 failed, 71 passed`):
+On the untouched starter, the expected result is **one clear grouped failure** (`1 failed, 72 passed`):
 
 ```text
 test_root_learner_owner_selection_returns_exact_alice_and_bob_fixtures
 ```
 
-That milestone asks the root `protectedResource.py` to inspect the already validated `access_record["resource_owner"]`, return the exact Alice fixture for `alice`, the exact Bob fixture for `bob`, and the explicit empty Unknown fixture otherwise. The corrected Alice movie title is `The Multidimensional Vector`. Once that single TODO is implemented, the full suite should pass. Copying `completed/protectedResource.py` over the root file in a temporary copy of this folder gives `72 passed`.
+That milestone asks the root `protectedResource.py` to inspect the already validated `access_record["resource_owner"]`, return the exact Alice fixture for `alice`, the exact Bob fixture for `bob`, and the explicit empty Unknown fixture otherwise. The corrected Alice movie title is `The Multidimensional Vector`. Once that single TODO is implemented, the full suite should pass. Copying `completed/protectedResource.py` over the root file in a temporary copy of this folder gives `73 passed`.
 
 The authorization page's Alice/Bob selector is intentionally insecure. It is a visible exercise fixture for demonstrating owner propagation, **not authentication** and not a production design. The owner must come only from a validated approval selection, be bound to the authorization code, and then be read from persisted access/refresh records. Request query values, headers, token-request owner fields, display names, and scope must never choose or override an owner.
 
@@ -44,7 +44,7 @@ The authorization page's Alice/Bob selector is intentionally insecure. It is a v
 
 No service needs to be running. Flask test clients invoke all three applications in process. Both outbound `requests.get` and `requests.post` are guarded and replaced by explicit mocks in client contract tests. Every test receives a newly reset SQLite file under pytest's temporary directory; import-time storage is also redirected to a temporary owner-aware database. Authorization/client globals are reset before and after every test. The repository `database.sqlite3`, production source, and answer key are not changed.
 
-The resource contract deliberately does not filter Favorites categories by scope: every valid persisted owner response is HTTP 200 and includes `movies`, `foods`, and `music`. Invalid or unknown bearer tokens are 401, database failures are 503, and a valid token with an unknown stored owner receives the explicit empty Unknown object.
+The resource contract deliberately does not filter Favorites categories by scope: every valid persisted owner response is HTTP 200 and includes `movies`, `foods`, and `music`. Invalid or unknown bearer tokens are 401, database failures are 503, and a valid token with an unknown stored owner receives the explicit empty `NO_DATA` object, which the client page shows as NO DATA.
 
 ## Same-tree troubleshooting
 

@@ -17,7 +17,11 @@
   <main>
     <p class="visually-hidden" data-copy-status aria-live="polite"></p>
     <section class="panel">
-      <h1>{{ data.user }}'s favorites</h1>
+      {% if data.user == "Unknown" %}
+        <h1 class="value-missing">No data</h1>
+      {% else %}
+        <h1>{{ data.user }}'s favorites</h1>
+      {% endif %}
       <p>
         Owner context came from the validated access-token record, not from
         client-supplied state or this resource request.

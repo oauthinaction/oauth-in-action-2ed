@@ -21,7 +21,7 @@ app = Flask(
     static_url_path="/assets",
 )
 BEARER_PATTERN = re.compile(
-    r"^Bearer ([A-Za-z0-9\-._~+/]+={0,2})$",
+    r"^bearer ([A-Za-z0-9\-._~+/]+={0,2})$",
     re.IGNORECASE,
 )
 OAuthError = tuple[Response, int]
@@ -35,10 +35,7 @@ def incoming_access_token() -> str | None:
     if authorization is not None:
         match = BEARER_PATTERN.fullmatch(authorization)
         return match.group(1) if match else None
-    form_access_token = request.form.get("access_token")
-    if form_access_token:
-        return form_access_token
-    return None
+    return request.form.get("access_token")
 
 
 @app.get("/")
@@ -86,9 +83,10 @@ def produce() -> Response | OAuthError:
         "meats": ["bacon", "steak", "chicken breast"],
     }
 
-    # TODO: Initialize all three produce lists as empty lists.
-    # TODO: Populate each list only when its exact scope name is present in
+    # TODO: Return each list only when its exact scope name is present in
     #       access_record["scope"].split(): fruit, veggies, or meats.
+    #       Otherwise return an empty list for it, for example:
+    #       fruit = [...] if <fruit scope granted> else []
     return jsonify(produce_result)
 
 

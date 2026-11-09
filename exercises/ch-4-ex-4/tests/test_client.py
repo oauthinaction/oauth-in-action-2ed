@@ -360,6 +360,27 @@ def test_favorites_request_uses_bearer_get_without_refresh(
     assert client_module.access_token == "access-123"
 
 
+def test_favorites_page_shows_no_data_for_the_unknown_owner(
+    client_module,
+    client_http,
+    requests_get,
+):
+    client_module.access_token = "access-123"
+    requests_get.return_value = oauth_response(
+        payload={
+            "user": "Unknown",
+            "favorites": {"movies": [], "foods": [], "music": []},
+        }
+    )
+
+    page = client_http.get("/favorites").get_data(as_text=True)
+
+    assert '<h1 class="value-missing">NO DATA</h1>' in page, (
+        "Show NO DATA when the resource returns its NO_DATA object"
+    )
+    assert "Unknown's favorites" not in page
+
+
 def test_favorites_page_renders_returned_owner_lists_and_scope(
     client_module,
     client_http,

@@ -34,7 +34,7 @@ app = Flask(
     static_url_path="/assets",
 )
 BEARER_PATTERN = re.compile(
-    r"^Bearer ([A-Za-z0-9\-._~+/]+={0,2})$",
+    r"^bearer ([A-Za-z0-9\-._~+/]+={0,2})$",
     re.IGNORECASE,
 )
 SAVED_WORDS: list[str] = []
@@ -49,10 +49,7 @@ def incoming_access_token() -> str | None:
     if authorization is not None:
         match = BEARER_PATTERN.fullmatch(authorization)
         return match.group(1) if match else None
-    form_access_token = request.form.get("access_token")
-    if form_access_token:
-        return form_access_token
-    return None
+    return request.form.get("access_token")
 
 
 @app.get("/")
@@ -84,6 +81,13 @@ def validated_access_record() -> tuple[AccessToken | None, OAuthError | None]:
     if access_record is None:
         return None, invalid_token()
     return access_record, None
+
+
+def has_scope(access_record: AccessToken, required_scope: str) -> bool:
+    """Check exact membership in a whitespace-delimited OAuth scope string."""
+    # TODO: Split access_record["scope"] on whitespace and return True only
+    # when required_scope is one of the granted scopes.
+    return False
 
 
 @app.get("/words")

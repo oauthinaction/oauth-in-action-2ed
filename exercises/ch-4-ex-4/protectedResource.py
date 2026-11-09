@@ -21,7 +21,7 @@ app = Flask(
     static_url_path="/assets",
 )
 BEARER_PATTERN = re.compile(
-    r"^Bearer ([A-Za-z0-9\-._~+/]+={0,2})$",
+    r"^bearer ([A-Za-z0-9\-._~+/]+={0,2})$",
     re.IGNORECASE,
 )
 OAuthError = tuple[Response, int]
@@ -50,7 +50,7 @@ BOB_FAVORITES = {
         "music": ["baroque", "ukulele", "baroque ukulele"],
     },
 }
-UNKNOWN_FAVORITES = {
+NO_DATA = {
     "user": "Unknown",
     "favorites": {"movies": [], "foods": [], "music": []},
 }
@@ -64,10 +64,7 @@ def incoming_access_token() -> str | None:
     if authorization is not None:
         match = BEARER_PATTERN.fullmatch(authorization)
         return match.group(1) if match else None
-    form_access_token = request.form.get("access_token")
-    if form_access_token:
-        return form_access_token
-    return None
+    return request.form.get("access_token")
 
 
 @app.get("/")
@@ -111,7 +108,7 @@ def favorites() -> Response | OAuthError:
 
     # TODO: Inspect the validated access_record["resource_owner"] and return
     #       ALICE_FAVORITES or BOB_FAVORITES for the exact matching identifier.
-    return jsonify(UNKNOWN_FAVORITES)
+    return jsonify(NO_DATA)
 
 
 if __name__ == "__main__":

@@ -33,7 +33,7 @@ app = Flask(
     static_url_path="/assets",
 )
 BEARER_PATTERN = re.compile(
-    r"^Bearer ([A-Za-z0-9\-._~+/]+={0,2})$",
+    r"^bearer ([A-Za-z0-9\-._~+/]+={0,2})$",
     re.IGNORECASE,
 )
 OAuthError = tuple[Response, int]
@@ -47,10 +47,7 @@ def incoming_access_token() -> str | None:
     if authorization is not None:
         match = BEARER_PATTERN.fullmatch(authorization)
         return match.group(1) if match else None
-    form_access_token = request.form.get("access_token")
-    if form_access_token:
-        return form_access_token
-    return None
+    return request.form.get("access_token")
 
 
 @app.get("/")
@@ -98,15 +95,21 @@ def produce() -> Response | OAuthError:
     if access_record is None:
         return invalid_token()
 
-    fruit: list[str] = []
-    veggies: list[str] = []
-    meats: list[str] = []
-    if has_scope(access_record, "fruit"):
-        fruit = ["apple", "banana", "kiwi"]
-    if has_scope(access_record, "veggies"):
-        veggies = ["lettuce", "onion", "potato"]
-    if has_scope(access_record, "meats"):
-        meats = ["bacon", "steak", "chicken breast"]
+    fruit = (
+        ["apple", "banana", "kiwi"]
+        if has_scope(access_record, "fruit")
+        else []
+    )
+    veggies = (
+        ["lettuce", "onion", "potato"]
+        if has_scope(access_record, "veggies")
+        else []
+    )
+    meats = (
+        ["bacon", "steak", "chicken breast"]
+        if has_scope(access_record, "meats")
+        else []
+    )
 
     return jsonify(fruit=fruit, veggies=veggies, meats=meats)
 
