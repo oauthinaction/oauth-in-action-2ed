@@ -1,0 +1,974 @@
+from datetime import datetime
+from unittest.mock import Mock
+
+import pytest
+import requests
+
+from helpers import (
+    TEST_CODE_CHALLENGE,
+    TEST_CODE_VERIFIER,
+    generate_test_code_challenge,
+    http_response,
+    oauth_form_headers,
+    redirect_query,
+)
+
+
+UNAUTHORIZED_NOTICE = b"The protected resource returned 401 Unauthorized."
+FRESHNESS_NOTICE = b"This is not a freshness problem."
+
+# Each Words API action: client route, query string, requests method,
+# the status the Words API returns on success, and the error wording.
+WORDS_ACTIONS = [
+    pytest.param("/get_words", {}, "get", 200, "get words", id="get"),
+    pytest.param(
+        "/add_word", {"word": "gamma"}, "post", 201, "add word", id="post"
+    ),
+    pytest.param(
+        "/delete_word", {}, "delete", 204, "delete word", id="delete"
+    ),
+]
+
+
+def expected_local_time(epoch):
+    local_time = datetime.fromtimestamp(epoch).astimezone()
+    return local_time.strftime("%Y-%m-%d %H:%M:%S %Z")
+
+
+def refresh_button_markup(page):
+    start = page.index('<form class="inline-form" action="/refresh"')
+    end = page.index("</form>", start)
+    return page[start:end]
+
+
+def test_build_url_preserves_existing_query_and_fragment(client_module):
+    url = client_module.build_url(
+        "https://server.example/authorize?keep=yes#chapter",
+        {"existing": "a value", "keep": "updated"},
+    )
+    assert url == (
+        "https://server.example/authorize"
+        "?keep=updated&existing=a+value#chapter"
+    )
+
+
+def test_basic_credentials_match_oauth_encoding(client_module):
+    expected = oauth_form_headers(
+        "client id",
+        "secret:+ value",
+    )["Authorization"]
+    actual = "Basic " + client_module.encode_client_credentials(
+        "client id", "secret:+ value"
+    )
+    assert actual == expected
+
+
+def test_client_generate_code_challenge_matches_rfc_7636(client_module):
+    assert (
+        generate_test_code_challenge(TEST_CODE_VERIFIER)
+        == TEST_CODE_CHALLENGE
+    )
+    assert (
+        client_module.generate_code_challenge(TEST_CODE_VERIFIER)
+        == TEST_CODE_CHALLENGE
+    )
+
+
+def test_generated_code_verifier_has_rfc_7636_strength_and_shape(
+    client_module,
+):
+    allowed_characters = frozenset(
+        "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
+        "abcdefghijklmnopqrstuvwxyz"
+        "0123456789-._~"
+    )
+    generated_verifiers = {
+        client_module.generate_code_verifier()
+        for _ in range(32)
+    }
+
+    assert len(generated_verifiers) == 32
+    for verifier in generated_verifiers:
+        assert 43 <= len(verifier) <= 128
+        assert set(verifier).issubset(allowed_characters)
+        challenge = client_module.generate_code_challenge(verifier)
+        assert len(challenge) == 43 and "=" not in challenge
+
+
+def test_authorize_requests_exact_scope_with_state_and_pkce(
+    client_module,
+    client_http,
+    monkeypatch,
+):
+    monkeypatch.setattr(
+        client_module,
+        "generate_code_verifier",
+        lambda: TEST_CODE_VERIFIER,
+    )
+    client_module.access_token = "old-access"
+    client_module.refresh_token = "retained-refresh"
+    client_module.scope = "old-scope"
+
+    response = client_http.get("/authorize")
+    parsed, params = redirect_query(response)
+
+    assert response.status_code == 302
+    assert (parsed.scheme, parsed.netloc, parsed.path) == (
+        "http", "localhost:9001", "/authorize"
+    )
+    assert params == {
+        "response_type": "code",
+        "client_id": "oauth-client-1",
+        "redirect_uri": "http://localhost:9000/callback",
+        "scope": "read write delete",
+        "state": client_module.state,
+        "code_challenge": TEST_CODE_CHALLENGE,
+        "code_challenge_method": "S256",
+    }
+    assert params["state"], "Send a fresh state value with the request"
+    assert client_module.code_verifier == TEST_CODE_VERIFIER
+    assert client_module.access_token is None
+    assert client_module.scope is None
+    assert client_module.refresh_token == "retained-refresh", (
+        "Starting a new authorization keeps the current refresh token"
+    )
+
+
+def test_authorize_sends_a_fresh_state_each_time(client_module, client_http):
+    _, first_params = redirect_query(client_http.get("/authorize"))
+    _, second_params = redirect_query(client_http.get("/authorize"))
+
+    assert first_params["state"] != second_params["state"]
+    assert second_params["state"] == client_module.state
+
+
+def test_callback_code_exchange_contract(
+    client_module,
+    client_http,
+    requests_post,
+):
+    client_module.state = "state-123"
+    client_module.code_verifier = TEST_CODE_VERIFIER
+    requests_post.side_effect = None
+    requests_post.return_value = http_response(
+        200,
+        {
+            "access_token": "access-123",
+            "token_type": "Bearer",
+            "refresh_token": "refresh-123",
+            "scope": "read write",
+        },
+    )
+
+    response = client_http.get(
+        "/callback",
+        query_string={"code": "code-123", "state": "state-123"},
+    )
+
+    assert response.status_code == 200
+    requests_post.assert_called_once_with(
+        "http://localhost:9001/token",
+        data={
+            "grant_type": "authorization_code",
+            "code": "code-123",
+            "redirect_uri": "http://localhost:9000/callback",
+            "code_verifier": TEST_CODE_VERIFIER,
+        },
+        headers=oauth_form_headers("oauth-client-1", "oauth-client-secret-1"),
+        timeout=5,
+        allow_redirects=False,
+    )
+    assert client_module.code_verifier is None
+    assert client_module.access_token == "access-123"
+    assert client_module.refresh_token == "refresh-123"
+    assert client_module.scope == "read write"
+    for shown_value in (b"access-123", b"refresh-123", b"read write"):
+        assert shown_value in response.data
+
+
+def test_callback_keeps_refresh_token_when_none_is_issued(
+    client_module,
+    client_http,
+    requests_post,
+):
+    client_module.state = "state-123"
+    client_module.code_verifier = TEST_CODE_VERIFIER
+    client_module.refresh_token = "retained-refresh"
+    requests_post.side_effect = None
+    requests_post.return_value = http_response(
+        200, {"access_token": "access-123", "scope": "read"}
+    )
+
+    client_http.get(
+        "/callback",
+        query_string={"code": "code-123", "state": "state-123"},
+    )
+
+    assert client_module.access_token == "access-123"
+    assert client_module.refresh_token == "retained-refresh"
+
+
+def test_callback_without_stored_verifier_makes_no_token_request(
+    client_module,
+    client_http,
+    requests_post,
+):
+    client_module.state = "state-123"
+    client_module.code_verifier = None
+
+    response = client_http.get(
+        "/callback",
+        query_string={"code": "code-123", "state": "state-123"},
+    )
+
+    assert response.status_code == 200
+    assert b"Missing PKCE code verifier" in response.data
+    requests_post.assert_not_called()
+
+
+def test_callback_error_consumes_verifier_without_token_request(
+    client_module,
+    client_http,
+    requests_post,
+):
+    client_module.state = "state-123"
+    client_module.code_verifier = TEST_CODE_VERIFIER
+
+    response = client_http.get(
+        "/callback",
+        query_string={"error": "access_denied"},
+    )
+
+    assert response.status_code == 200
+    assert b"access_denied" in response.data
+    assert client_module.code_verifier is None
+    requests_post.assert_not_called()
+
+
+@pytest.mark.parametrize(
+    ("stored_state", "returned_state"),
+    [
+        ("state-123", "other-state"),
+        ("state-123", None),
+        (None, "state-123"),
+    ],
+    ids=["different-state", "missing-state", "no-authorization-request"],
+)
+def test_callback_rejects_state_mismatch(
+    client_module,
+    client_http,
+    requests_post,
+    stored_state,
+    returned_state,
+):
+    client_module.state = stored_state
+    client_module.code_verifier = TEST_CODE_VERIFIER
+    query = {"code": "code-123"}
+    if returned_state is not None:
+        query["state"] = returned_state
+
+    response = client_http.get("/callback", query_string=query)
+
+    assert response.status_code == 200
+    assert b"State value did not match" in response.data
+    requests_post.assert_not_called()
+    assert client_module.access_token is None
+
+
+@pytest.mark.parametrize("token_status", [302, 201])
+def test_callback_accepts_only_token_status_200(
+    client_module,
+    client_http,
+    requests_post,
+    token_status,
+):
+    client_module.state = "state-123"
+    client_module.code_verifier = TEST_CODE_VERIFIER
+    requests_post.side_effect = None
+    requests_post.return_value = http_response(
+        token_status,
+        {
+            "access_token": "rejected-access",
+            "refresh_token": "rejected-refresh",
+            "scope": "read",
+        },
+    )
+
+    response = client_http.get(
+        "/callback",
+        query_string={"code": "code-123", "state": "state-123"},
+    )
+
+    assert response.status_code == 200
+    assert f"server response: {token_status}".encode() in response.data
+    assert client_module.access_token is None
+    assert client_module.refresh_token is None
+    assert client_module.scope is None
+    assert b"rejected-access" not in response.data
+
+
+def test_callback_connection_failure_is_rendered_not_500(
+    client_module,
+    client_http,
+    requests_post,
+):
+    client_module.state = "state-123"
+    client_module.code_verifier = TEST_CODE_VERIFIER
+    requests_post.side_effect = requests.ConnectionError(
+        "token endpoint unavailable",
+    )
+
+    response = client_http.get(
+        "/callback",
+        query_string={"code": "code-123", "state": "state-123"},
+    )
+
+    assert response.status_code == 200
+    assert b"Unable to fetch access token" in response.data
+    assert client_module.access_token is None
+
+
+def test_get_words_uses_bearer_get_and_renders_result(
+    client_module,
+    client_http,
+    requests_get,
+    monkeypatch,
+):
+    client_module.access_token = "access-123"
+    client_module.scope = "read write delete"
+    refresh_helper = Mock()
+    monkeypatch.setattr(client_module, "refresh_access_token", refresh_helper)
+    requests_get.side_effect = None
+    requests_get.return_value = http_response(
+        200, {"words": "alpha beta", "timestamp": 1700000000123}
+    )
+
+    response = client_http.get("/get_words")
+
+    assert response.status_code == 200
+    requests_get.assert_called_once_with(
+        "http://localhost:9002/words",
+        headers={"Authorization": "Bearer access-123"},
+        timeout=5,
+        allow_redirects=False,
+    )
+    for shown_value in (
+        b"GET succeeded.",
+        b"alpha beta",
+        b"1700000000123",
+        b"read write delete",
+    ):
+        assert shown_value in response.data
+    assert client_module.access_token == "access-123"
+    refresh_helper.assert_not_called()
+
+
+def test_add_word_posts_form_field_with_bearer(
+    client_module,
+    client_http,
+    requests_post,
+):
+    client_module.access_token = "access-123"
+    created = Mock(status_code=201)
+    created.json.side_effect = AssertionError(
+        "The POST success has no body to decode"
+    )
+    requests_post.side_effect = None
+    requests_post.return_value = created
+
+    response = client_http.get("/add_word", query_string={"word": "gamma"})
+
+    assert response.status_code == 200
+    requests_post.assert_called_once_with(
+        "http://localhost:9002/words",
+        data={"word": "gamma"},
+        headers={
+            "Content-Type": "application/x-www-form-urlencoded",
+            "Authorization": "Bearer access-123",
+        },
+        timeout=5,
+        allow_redirects=False,
+    )
+    assert b"POST succeeded." in response.data
+    assert b"<code data-copy-value>201</code>" in response.data
+    created.json.assert_not_called()
+    assert client_module.access_token == "access-123"
+
+
+def test_delete_word_sends_only_bearer_header(
+    client_module,
+    client_http,
+    requests_delete,
+):
+    client_module.access_token = "access-123"
+    no_content = Mock(status_code=204)
+    no_content.json.side_effect = AssertionError(
+        "The DELETE success has no body to decode"
+    )
+    requests_delete.side_effect = None
+    requests_delete.return_value = no_content
+
+    response = client_http.get("/delete_word")
+
+    assert response.status_code == 200
+    requests_delete.assert_called_once_with(
+        "http://localhost:9002/words",
+        headers={"Authorization": "Bearer access-123"},
+        timeout=5,
+        allow_redirects=False,
+    )
+    assert b"DELETE succeeded." in response.data
+    assert b"<code data-copy-value>204</code>" in response.data
+    no_content.json.assert_not_called()
+    assert client_module.access_token == "access-123"
+
+
+@pytest.mark.parametrize(
+    ("route", "query", "method", "success_status", "action"),
+    WORDS_ACTIONS,
+)
+def test_words_action_without_access_token_makes_no_request(
+    client_module,
+    client_http,
+    isolated_runtime,
+    route,
+    query,
+    method,
+    success_status,
+    action,
+):
+    client_module.access_token = None
+
+    response = client_http.get(route, query_string=query)
+
+    assert response.status_code == 200
+    assert b"Missing Access Token" in response.data
+    isolated_runtime[method].assert_not_called()
+
+
+@pytest.mark.parametrize(
+    ("route", "query", "method", "success_status", "action"),
+    WORDS_ACTIONS,
+)
+def test_401_is_reported_and_never_refreshes_automatically(
+    client_module,
+    client_http,
+    isolated_runtime,
+    monkeypatch,
+    route,
+    query,
+    method,
+    success_status,
+    action,
+):
+    client_module.access_token = "expired-access"
+    client_module.refresh_token = "refresh-123"
+    refresh_helper = Mock()
+    monkeypatch.setattr(client_module, "refresh_access_token", refresh_helper)
+    words_request = isolated_runtime[method]
+    words_request.side_effect = None
+    words_request.return_value = http_response(
+        401, {"error": "invalid_token"}
+    )
+
+    response = client_http.get(route, query_string=query)
+    page = response.get_data(as_text=True)
+
+    assert response.status_code == 200
+    assert UNAUTHORIZED_NOTICE in response.data
+    assert "<dt>Access token</dt>" in page, (
+        "Report the 401 on the client page so the Refresh token button "
+        "is available"
+    )
+    assert "Refresh token" in refresh_button_markup(page)
+    refresh_helper.assert_not_called()
+    words_request.assert_called_once()
+    assert client_module.access_token is None
+    assert client_module.refresh_token == "refresh-123"
+
+
+@pytest.mark.parametrize(
+    ("route", "query", "method", "success_status", "action"),
+    WORDS_ACTIONS,
+)
+def test_401_right_after_refresh_is_not_a_freshness_problem(
+    client_module,
+    client_http,
+    isolated_runtime,
+    monkeypatch,
+    route,
+    query,
+    method,
+    success_status,
+    action,
+):
+    client_module.access_token = "just-refreshed-access"
+    client_module.last_refresh_epoch = 1_000
+    monkeypatch.setattr(client_module.time, "time", lambda: 1_005)
+    refresh_helper = Mock()
+    monkeypatch.setattr(client_module, "refresh_access_token", refresh_helper)
+    words_request = isolated_runtime[method]
+    words_request.side_effect = None
+    words_request.return_value = http_response(
+        401, {"error": "invalid_token"}
+    )
+
+    response = client_http.get(route, query_string=query)
+
+    assert response.status_code == 200
+    assert FRESHNESS_NOTICE in response.data
+    assert UNAUTHORIZED_NOTICE not in response.data
+    refresh_helper.assert_not_called()
+    assert client_module.access_token is None
+
+    monkeypatch.setattr(client_module.time, "time", lambda: 1_020)
+    client_module.access_token = "older-access"
+    later = client_http.get(route, query_string=query)
+
+    assert UNAUTHORIZED_NOTICE in later.data, (
+        "Once the 20-second wait is over, suggest refreshing the token again"
+    )
+
+
+@pytest.mark.parametrize(
+    ("route", "query", "method", "returned_status", "action"),
+    [
+        pytest.param(
+            "/get_words", {}, "get", 201, "get words", id="get-201"
+        ),
+        pytest.param(
+            "/get_words", {}, "get", 302, "get words", id="get-302"
+        ),
+        pytest.param(
+            "/get_words", {}, "get", 403, "get words", id="get-403"
+        ),
+        pytest.param(
+            "/add_word",
+            {"word": "gamma"},
+            "post",
+            200,
+            "add word",
+            id="post-200",
+        ),
+        pytest.param(
+            "/add_word",
+            {"word": "gamma"},
+            "post",
+            403,
+            "add word",
+            id="post-403",
+        ),
+        pytest.param(
+            "/delete_word", {}, "delete", 200, "delete word", id="delete-200"
+        ),
+        pytest.param(
+            "/delete_word", {}, "delete", 500, "delete word", id="delete-500"
+        ),
+    ],
+)
+def test_unexpected_words_status_is_an_error_and_never_refreshes(
+    client_module,
+    client_http,
+    isolated_runtime,
+    monkeypatch,
+    route,
+    query,
+    method,
+    returned_status,
+    action,
+):
+    client_module.access_token = "access-123"
+    client_module.refresh_token = "refresh-123"
+    refresh_helper = Mock()
+    monkeypatch.setattr(client_module, "refresh_access_token", refresh_helper)
+    words_request = isolated_runtime[method]
+    words_request.side_effect = None
+    words_request.return_value = http_response(
+        returned_status, {"words": "unexpected", "timestamp": 1}
+    )
+
+    response = client_http.get(route, query_string=query)
+
+    assert response.status_code == 200
+    expected_error = f"Status: {returned_status}, unable to {action}."
+    assert expected_error.encode() in response.data
+    assert b"succeeded." not in response.data
+    assert client_module.access_token is None
+    assert client_module.refresh_token == "refresh-123"
+    refresh_helper.assert_not_called()
+
+
+@pytest.mark.parametrize(
+    ("route", "query", "method", "success_status", "action"),
+    WORDS_ACTIONS,
+)
+def test_words_connection_failure_is_rendered_not_500(
+    client_module,
+    client_http,
+    isolated_runtime,
+    route,
+    query,
+    method,
+    success_status,
+    action,
+):
+    client_module.access_token = "access-123"
+    isolated_runtime[method].side_effect = requests.ConnectionError(
+        "Words API unavailable",
+    )
+
+    response = client_http.get(route, query_string=query)
+
+    assert response.status_code == 200
+    assert f"Unable to {action}".encode() in response.data
+    assert client_module.access_token is None
+
+
+def test_refresh_button_runs_refresh_and_records_epoch(
+    client_module,
+    client_http,
+    isolated_runtime,
+    monkeypatch,
+):
+    refreshed_at = 1_700_000_000
+    client_module.refresh_token = "refresh-123"
+    monkeypatch.setattr(client_module.time, "time", lambda: refreshed_at)
+
+    def refresh_once():
+        client_module.access_token = "replacement-access"
+        client_module.refresh_token = "rotated-refresh"
+        return True
+
+    refresh_helper = Mock(side_effect=refresh_once)
+    monkeypatch.setattr(client_module, "refresh_access_token", refresh_helper)
+
+    response = client_http.post("/refresh")
+
+    assert response.status_code == 303
+    assert response.headers["Location"] == "/"
+    refresh_helper.assert_called_once_with()
+    # Refreshing never calls the Words API; the user clicks an action again.
+    for method in ("get", "post", "delete"):
+        isolated_runtime[method].assert_not_called()
+    assert client_module.last_refresh_epoch == refreshed_at
+
+    home = client_http.get("/")
+    assert expected_local_time(refreshed_at).encode() in home.data
+    assert b"replacement-access" in home.data
+    assert b"rotated-refresh" in home.data
+
+
+def test_refresh_requires_post(client_http):
+    response = client_http.get("/refresh")
+
+    assert response.status_code == 405
+
+
+def test_failed_refresh_reports_error_and_keeps_last_epoch(
+    client_module,
+    client_http,
+    requests_post,
+    monkeypatch,
+):
+    client_module.refresh_token = "refresh-123"
+    client_module.last_refresh_epoch = 1_000
+    monkeypatch.setattr(client_module.time, "time", lambda: 1_100)
+    refresh_helper = Mock(return_value=False)
+    monkeypatch.setattr(client_module, "refresh_access_token", refresh_helper)
+
+    response = client_http.post("/refresh")
+
+    assert response.status_code == 200
+    assert b"Unable to refresh token." in response.data
+    refresh_helper.assert_called_once_with()
+    assert client_module.last_refresh_epoch == 1_000
+    requests_post.assert_not_called()
+
+
+def test_refresh_is_blocked_for_20_seconds_after_last_refresh(
+    client_module,
+    client_http,
+    monkeypatch,
+):
+    client_module.refresh_token = "refresh-123"
+    client_module.last_refresh_epoch = 1_000
+    refresh_helper = Mock(return_value=True)
+    monkeypatch.setattr(client_module, "refresh_access_token", refresh_helper)
+
+    monkeypatch.setattr(client_module.time, "time", lambda: 1_005)
+    blocked = client_http.post("/refresh")
+    blocked_page = blocked.get_data(as_text=True)
+
+    assert blocked.status_code == 200
+    assert (
+        "You need to wait 15 seconds before you can refresh again."
+        in blocked_page
+    )
+    assert "<dt>Access token</dt>" in blocked_page, (
+        "Show the wait message on the client page, not an error page"
+    )
+    refresh_helper.assert_not_called()
+    assert client_module.last_refresh_epoch == 1_000
+
+    monkeypatch.setattr(client_module.time, "time", lambda: 1_019)
+    last_second = client_http.post("/refresh")
+
+    assert (
+        b"You need to wait 1 seconds before you can refresh again."
+        in last_second.data
+    )
+    refresh_helper.assert_not_called()
+
+    monkeypatch.setattr(client_module.time, "time", lambda: 1_020)
+    allowed = client_http.post("/refresh")
+
+    assert allowed.status_code == 303
+    refresh_helper.assert_called_once_with()
+    assert client_module.last_refresh_epoch == 1_020
+
+
+def test_refresh_without_refresh_token_is_rejected(
+    client_module,
+    client_http,
+    monkeypatch,
+):
+    client_module.refresh_token = None
+    refresh_helper = Mock()
+    monkeypatch.setattr(client_module, "refresh_access_token", refresh_helper)
+
+    response = client_http.post("/refresh")
+
+    assert b"No refresh token available." in response.data
+    refresh_helper.assert_not_called()
+
+
+@pytest.mark.parametrize(
+    ("refresh_token", "last_refresh_epoch"),
+    [
+        ("refresh-123", None),
+        ("refresh-123", 1_000),
+        (None, None),
+    ],
+    ids=["no-refresh-yet", "during-wait", "no-refresh-token"],
+)
+def test_refresh_button_is_always_enabled(
+    client_module,
+    client_http,
+    monkeypatch,
+    refresh_token,
+    last_refresh_epoch,
+):
+    client_module.refresh_token = refresh_token
+    client_module.last_refresh_epoch = last_refresh_epoch
+    monkeypatch.setattr(client_module.time, "time", lambda: 1_005)
+
+    page = client_http.get("/").get_data(as_text=True)
+
+    assert "disabled" not in refresh_button_markup(page)
+    assert "You need to wait" not in page
+
+
+def test_refresh_button_flow_with_real_helper(
+    client_module,
+    client_http,
+    requests_post,
+    monkeypatch,
+):
+    client_module.refresh_token = "refresh-123"
+    monkeypatch.setattr(client_module.time, "time", lambda: 2_000)
+    requests_post.side_effect = None
+    requests_post.return_value = http_response(
+        200,
+        {
+            "access_token": "new-access",
+            "token_type": "Bearer",
+            "refresh_token": "rotated-refresh",
+            "scope": "read delete",
+        },
+    )
+
+    response = client_http.post("/refresh")
+
+    assert response.status_code == 303
+    requests_post.assert_called_once()
+    assert requests_post.call_args.args[0] == "http://localhost:9001/token"
+    assert client_module.access_token == "new-access"
+    assert client_module.refresh_token == "rotated-refresh"
+    assert client_module.scope == "read delete"
+    assert client_module.last_refresh_epoch == 2_000
+
+
+def test_refresh_posts_exact_contract_and_rotates_tokens(
+    client_module,
+    requests_post,
+):
+    client_module.access_token = None
+    client_module.refresh_token = "old-refresh"
+    client_module.scope = "old-scope"
+    requests_post.side_effect = None
+    requests_post.return_value = http_response(
+        200,
+        {
+            "access_token": "new-access",
+            "token_type": "Bearer",
+            "refresh_token": "rotated-refresh",
+            "scope": "read write",
+        },
+    )
+
+    result = client_module.refresh_access_token()
+
+    assert result is True
+    requests_post.assert_called_once_with(
+        "http://localhost:9001/token",
+        data={
+            "grant_type": "refresh_token",
+            "refresh_token": "old-refresh",
+        },
+        headers=oauth_form_headers("oauth-client-1", "oauth-client-secret-1"),
+        timeout=5,
+        allow_redirects=False,
+    )
+    assert client_module.access_token == "new-access"
+    assert client_module.refresh_token == "rotated-refresh"
+    assert client_module.scope == "read write"
+
+
+@pytest.mark.parametrize(
+    "token_response",
+    [
+        http_response(400, {"error": "invalid_grant"}),
+        http_response(
+            201,
+            {
+                "access_token": "created-access",
+                "refresh_token": "created-refresh",
+            },
+        ),
+        http_response(
+            302,
+            {
+                "access_token": "redirect-access",
+                "refresh_token": "redirect-refresh",
+            },
+        ),
+    ],
+    ids=[
+        "token-endpoint-rejection",
+        "token-endpoint-201",
+        "token-endpoint-redirect",
+    ],
+)
+def test_refresh_failure_clears_unusable_refresh_token(
+    client_module,
+    requests_post,
+    token_response,
+):
+    client_module.access_token = "existing-access"
+    client_module.refresh_token = "invalid-refresh"
+    requests_post.side_effect = None
+    requests_post.return_value = token_response
+
+    result = client_module.refresh_access_token()
+
+    assert result is False
+    assert client_module.access_token == "existing-access"
+    assert client_module.refresh_token is None
+
+
+def test_refresh_connection_failure_clears_refresh_token(
+    client_module,
+    requests_post,
+):
+    client_module.refresh_token = "refresh-123"
+    requests_post.side_effect = requests.ConnectionError(
+        "token endpoint unavailable",
+    )
+
+    assert client_module.refresh_access_token() is False
+    assert client_module.refresh_token is None
+
+
+def test_index_renders_token_rows_in_order(client_http):
+    response = client_http.get("/")
+    page = response.get_data(as_text=True)
+
+    assert response.status_code == 200
+    rows = [
+        "<dt>Access token</dt>",
+        "<dt>Scope</dt>",
+        "<dt>Refresh token</dt>",
+        "<dt>Last refresh</dt>",
+    ]
+    positions = [page.index(row) for row in rows]
+    assert positions == sorted(positions)
+    assert "Refresh token\n" in refresh_button_markup(page)
+    assert 'href="/words"' in page
+
+
+def test_home_copy_contract_for_missing_and_present_values(
+    client_module,
+    client_http,
+):
+    missing = client_http.get("/")
+    missing_markup = b'<span class="token value-missing">NONE</span>'
+
+    assert missing.status_code == 200
+    assert missing.data.count(missing_markup) == 4, (
+        "Show NONE for the access token, scope, refresh token, and last "
+        "refresh time"
+    )
+    assert missing.data.count(b"data-copy-value") == 0
+    assert missing.data.count(b"data-copy-button") == 0
+
+    client_module.access_token = "present-access"
+    client_module.scope = "read write"
+    client_module.refresh_token = "present-refresh"
+    client_module.last_refresh_epoch = 1_000
+    present = client_http.get("/")
+
+    for value in (
+        b"present-access",
+        b"read write",
+        b"present-refresh",
+        expected_local_time(1_000).encode(),
+    ):
+        assert value in present.data
+    assert present.data.count(b"data-copy-value") == 3
+    assert present.data.count(b"data-copy-button") == 3
+    assert missing_markup not in present.data
+
+
+def test_words_page_shows_current_scope(client_module, client_http):
+    client_module.scope = "read delete"
+
+    response = client_http.get("/words")
+
+    assert response.status_code == 200
+    assert b"<code data-copy-value>read delete</code>" in response.data
+    assert b"No successful GET result yet." in response.data
+    for action_link in (b'href="/get_words"', b'action="/add_word"'):
+        assert action_link in response.data
+    assert b'href="/delete_word"' in response.data
+
+
+def test_words_page_shows_none_without_scope(client_http):
+    response = client_http.get("/words")
+
+    assert b'<span class="token value-missing">NONE</span>' in response.data
+
+
+def test_common_javascript_asset_is_served(client_http):
+    response = client_http.get("/assets/common.js")
+
+    assert response.status_code == 200
+    assert b"navigator.clipboard.writeText" in response.data
+
+
+def test_common_css_has_refresh_and_notice_styles(client_http):
+    response = client_http.get("/assets/common.css")
+    css = response.get_data(as_text=True)
+
+    assert response.status_code == 200
+    for selector in (".button-refresh {", ".inline-form {", ".notice {"):
+        assert selector in css

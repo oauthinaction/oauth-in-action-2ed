@@ -1,0 +1,114 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Produce API Response</title>
+  <link rel="stylesheet" href="/assets/common.css">
+  <script src="/assets/common.js" defer></script>
+</head>
+<body class="client">
+  <header class="site-header">
+    <div class="header-inner">
+      <a class="brand" href="/">OAuth in Action</a>
+      <span class="service-label">Produce API Client - localhost:9000</span>
+    </div>
+  </header>
+  <main>
+    <p class="visually-hidden" data-copy-status aria-live="polite"></p>
+    <section class="panel">
+      <h1>Produce API response</h1>
+      <p>
+        Current granted scope:
+        {% if scope %}
+          <span class="copyable-inline" data-copy-container>
+            <code data-copy-value>{{ scope }}</code>
+            <button class="copy-button" type="button" data-copy-button
+              aria-label="Copy current scope" title="Copy current scope">
+              <span class="copy-icon" aria-hidden="true"></span>
+            </button>
+          </span>
+        {% else %}
+          <span class="token value-missing">NONE</span>
+          <span class="muted">(no produce scopes granted)</span>
+        {% endif %}
+      </p>
+      <p class="muted">
+        Each category is filtered independently by the scopes granted to this
+        access token.
+      </p>
+    </section>
+
+    <section class="panel" aria-labelledby="fruit-heading">
+      <h2 id="fruit-heading">Fruit</h2>
+      {% if produce.fruit %}
+        <ul>
+          {% for value in produce.fruit %}
+            <li>
+              <span class="copyable-inline" data-copy-container>
+                <span data-copy-value>{{ value }}</span>
+                <button class="copy-button" type="button" data-copy-button
+                  aria-label="Copy fruit value {{ value }}"
+                  title="Copy {{ value }}">
+                  <span class="copy-icon" aria-hidden="true"></span>
+                </button>
+              </span>
+            </li>
+          {% endfor %}
+        </ul>
+      {% else %}
+        <p class="muted">No fruit was returned for this grant.</p>
+      {% endif %}
+    </section>
+
+    <section class="panel" aria-labelledby="veggies-heading">
+      <h2 id="veggies-heading">Veggies</h2>
+      {% if produce.veggies %}
+        <ul>
+          {% for value in produce.veggies %}
+            <li>
+              <span class="copyable-inline" data-copy-container>
+                <span data-copy-value>{{ value }}</span>
+                <button class="copy-button" type="button" data-copy-button
+                  aria-label="Copy veggie value {{ value }}"
+                  title="Copy {{ value }}">
+                  <span class="copy-icon" aria-hidden="true"></span>
+                </button>
+              </span>
+            </li>
+          {% endfor %}
+        </ul>
+      {% else %}
+        <p class="muted">No veggies were returned for this grant.</p>
+      {% endif %}
+    </section>
+
+    <section class="panel" aria-labelledby="meats-heading">
+      <h2 id="meats-heading">Meats</h2>
+      {% if produce.meats %}
+        <ul>
+          {% for value in produce.meats %}
+            <li>
+              <span class="copyable-inline" data-copy-container>
+                <span data-copy-value>{{ value }}</span>
+                <button class="copy-button" type="button" data-copy-button
+                  aria-label="Copy meat value {{ value }}"
+                  title="Copy {{ value }}">
+                  <span class="copy-icon" aria-hidden="true"></span>
+                </button>
+              </span>
+            </li>
+          {% endfor %}
+        </ul>
+      {% else %}
+        <p class="muted">No meats were returned for this grant.</p>
+      {% endif %}
+    </section>
+
+    <div class="actions">
+      <a class="button button-primary" href="/produce">Get produce again</a>
+      <a class="button button-secondary" href="/">Back to client tokens</a>
+    </div>
+  </main>
+</body>
+</html>

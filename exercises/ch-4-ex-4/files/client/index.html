@@ -1,0 +1,90 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Favorites API Client</title>
+  <link rel="stylesheet" href="/assets/common.css">
+  <script src="/assets/common.js" defer></script>
+</head>
+<body class="client">
+  <header class="site-header">
+    <div class="header-inner">
+      <a class="brand" href="/">OAuth in Action</a>
+      <span class="service-label">Favorites API Client - localhost:9000</span>
+    </div>
+  </header>
+  <main>
+    <p class="visually-hidden" data-copy-status aria-live="polite"></p>
+    <section class="panel">
+      <h1>OAuth Client</h1>
+      <p class="muted">
+        Choose Alice or Bob on the exercise approval screen, receive an
+        owner-bound token pair, then call the protected Favorites API.
+      </p>
+      <dl>
+        <dt>Access token</dt>
+        <dd>
+          {% if access_token %}
+            <span class="copyable-inline" data-copy-container>
+              <span class="token" data-copy-value>{{ access_token }}</span>
+              <button class="copy-button" type="button" data-copy-button
+                aria-label="Copy access token" title="Copy access token">
+                <span class="copy-icon" aria-hidden="true"></span>
+              </button>
+            </span>
+          {% else %}<span class="token value-missing">NONE</span>{% endif %}
+        </dd>
+        <dt>Scope</dt>
+        <dd>
+          {% if scope %}
+            <span class="copyable-inline" data-copy-container>
+              <span class="token" data-copy-value>{{ scope }}</span>
+              <button class="copy-button" type="button" data-copy-button
+                aria-label="Copy scope" title="Copy scope">
+                <span class="copy-icon" aria-hidden="true"></span>
+              </button>
+            </span>
+          {% else %}<span class="token value-missing">NONE</span>{% endif %}
+        </dd>
+        <dt>Refresh token</dt>
+        <dd>
+          {% if refresh_token %}
+            <span class="copyable-inline" data-copy-container>
+              <span class="token" data-copy-value>{{ refresh_token }}</span>
+              <button class="copy-button" type="button" data-copy-button
+                aria-label="Copy refresh token" title="Copy refresh token">
+                <span class="copy-icon" aria-hidden="true"></span>
+              </button>
+            </span>
+          {% else %}<span class="token value-missing">NONE</span>{% endif %}
+        </dd>
+        <dt>Last refresh</dt>
+        <dd>
+          {% if last_refresh_time %}
+            <span class="token">{{ last_refresh_time }}</span>
+          {% else %}
+            <span class="token value-missing">NONE</span>
+          {% endif %}
+        </dd>
+      </dl>
+      {% if notice %}
+        <p class="notice" role="status">{{ notice }}</p>
+      {% endif %}
+      <div class="actions">
+        <a class="button button-primary" href="/authorize">
+          Authorize movies, foods, and music
+        </a>
+        <a class="button button-secondary" href="/favorites">
+          Get the resource owner's favorites
+        </a>
+        <form class="inline-form" action="/refresh" method="post">
+          <button class="button button-refresh" type="submit">
+            Refresh token
+          </button>
+        </form>
+      </div>
+    </section>
+  </main>
+</body>
+</html>
