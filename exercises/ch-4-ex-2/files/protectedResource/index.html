@@ -1,0 +1,121 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Protected Words Resource</title>
+  <link rel="stylesheet" href="/assets/common.css">
+  <script src="/assets/common.js" defer></script>
+</head>
+<body class="resource">
+  <header class="site-header">
+    <div class="header-inner">
+      <a class="brand" href="/">OAuth in Action</a>
+      <span class="service-label">Protected Words API - localhost:9002</span>
+    </div>
+  </header>
+  <main>
+    <p class="visually-hidden" data-copy-status aria-live="polite"></p>
+    <section class="panel">
+      <h1>Protected Words API</h1>
+      <p>
+        All operations use
+        <span class="copyable-inline" data-copy-container>
+          <code data-copy-value>http://localhost:9002/words</code>
+          <button class="copy-button" type="button" data-copy-button
+            aria-label="Copy Words endpoint" title="Copy Words endpoint">
+            <span class="copy-icon" aria-hidden="true"></span>
+          </button>
+        </span>
+        with a Bearer access token.
+      </p>
+      <div class="table-scroll">
+        <table>
+          <caption>Words operations and required OAuth scopes</caption>
+          <thead>
+            <tr>
+              <th scope="col">Operation</th>
+              <th scope="col">HTTP method</th>
+              <th scope="col">Required scope</th>
+              <th scope="col">Successful response</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <th scope="row">Read words</th>
+              <td>
+                <span class="copyable-inline" data-copy-container>
+                  <code data-copy-value>GET</code>
+                  <button class="copy-button" type="button" data-copy-button
+                    aria-label="Copy GET method" title="Copy GET method">
+                    <span class="copy-icon" aria-hidden="true"></span>
+                  </button>
+                </span>
+              </td>
+              <td>
+                <span class="copyable-inline" data-copy-container>
+                  <code data-copy-value>read</code>
+                  <button class="copy-button" type="button" data-copy-button
+                    aria-label="Copy read scope" title="Copy read scope">
+                    <span class="copy-icon" aria-hidden="true"></span>
+                  </button>
+                </span>
+              </td>
+              <td>200 JSON</td>
+            </tr>
+            <tr>
+              <th scope="row">Append a word</th>
+              <td>
+                <span class="copyable-inline" data-copy-container>
+                  <code data-copy-value>POST</code>
+                  <button class="copy-button" type="button" data-copy-button
+                    aria-label="Copy POST method" title="Copy POST method">
+                    <span class="copy-icon" aria-hidden="true"></span>
+                  </button>
+                </span>
+              </td>
+              <td>
+                <span class="copyable-inline" data-copy-container>
+                  <code data-copy-value>write</code>
+                  <button class="copy-button" type="button" data-copy-button
+                    aria-label="Copy write scope" title="Copy write scope">
+                    <span class="copy-icon" aria-hidden="true"></span>
+                  </button>
+                </span>
+              </td>
+              <td>201 empty body</td>
+            </tr>
+            <tr>
+              <th scope="row">Remove the last word</th>
+              <td>
+                <span class="copyable-inline" data-copy-container>
+                  <code data-copy-value>DELETE</code>
+                  <button class="copy-button" type="button" data-copy-button
+                    aria-label="Copy DELETE method" title="Copy DELETE method">
+                    <span class="copy-icon" aria-hidden="true"></span>
+                  </button>
+                </span>
+              </td>
+              <td>
+                <span class="copyable-inline" data-copy-container>
+                  <code data-copy-value>delete</code>
+                  <button class="copy-button" type="button" data-copy-button
+                    aria-label="Copy delete scope" title="Copy delete scope">
+                    <span class="copy-icon" aria-hidden="true"></span>
+                  </button>
+                </span>
+              </td>
+              <td>204 empty body</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+      <p class="muted">
+        The starter validates tokens but intentionally leaves per-operation scope
+        enforcement as the exercise. The completed version returns 403 for an
+        insufficient valid scope.
+      </p>
+    </section>
+  </main>
+</body>
+</html>

@@ -1,0 +1,116 @@
+"""Protected resource starter for Chapter 4 Exercise 4."""
+
+import re
+from pathlib import Path
+
+from flask import Flask, Response, jsonify, render_template, request
+
+from oauth_store import (
+    AccessToken,
+    DatabaseError,
+    find_access_token,
+    initialize_schema,
+)
+
+
+BASE_DIR = Path(__file__).resolve().parent
+app = Flask(
+    __name__,
+    template_folder=str(BASE_DIR / "files" / "protectedResource"),
+    static_folder=str(BASE_DIR / "files"),
+    static_url_path="/assets",
+)
+BEARER_PATTERN = re.compile(
+    r"^bearer ([A-Za-z0-9\-._~+/]+={0,2})$",
+    re.IGNORECASE,
+)
+OAuthError = tuple[Response, int]
+
+ALICE_FAVORITES = {
+    "user": "Alice",
+    "favorites": {
+        "movies": [
+            "The Multidimensional Vector",
+            "Space Fights",
+            "Jewelry Boss",
+        ],
+        "foods": ["bacon", "pizza", "bacon pizza"],
+        "music": ["techno", "industrial", "alternative"],
+    },
+}
+BOB_FAVORITES = {
+    "user": "Bob",
+    "favorites": {
+        "movies": [
+            "An Unrequited Love",
+            "Several Shades of Turquoise",
+            "Think Of The Children",
+        ],
+        "foods": ["bacon", "kale", "gravel"],
+        "music": ["baroque", "ukulele", "baroque ukulele"],
+    },
+}
+NO_DATA = {
+    "user": "Unknown",
+    "favorites": {"movies": [], "foods": [], "music": []},
+}
+
+
+def incoming_access_token() -> str | None:
+    """Read a strict Bearer token, or a form token if there is no header."""
+    # HTTP field names are case-insensitive. Werkzeug's header mapping handles
+    # that lookup while preserving the case-sensitive credential value.
+    authorization = request.headers.get("Authorization")
+    if authorization is not None:
+        match = BEARER_PATTERN.fullmatch(authorization)
+        return match.group(1) if match else None
+    return request.form.get("access_token")
+
+
+@app.get("/")
+def index() -> str:
+    return render_template("index.html")
+
+
+def temporarily_unavailable() -> OAuthError:
+    response = jsonify(error="temporarily_unavailable")
+    response.headers["Retry-After"] = "1"
+    return response, 503
+
+
+def invalid_token() -> OAuthError:
+    response = jsonify(error="invalid_token")
+    response.headers["WWW-Authenticate"] = 'Bearer realm="protected-resource"'
+    return response, 401
+
+
+def validated_access_record() -> tuple[AccessToken | None, OAuthError | None]:
+    """Return the exact stored token record or a structured OAuth error."""
+    token = incoming_access_token()
+    if not token:
+        return None, invalid_token()
+    try:
+        access_record = find_access_token(token)
+    except DatabaseError:
+        return None, temporarily_unavailable()
+    if access_record is None:
+        return None, invalid_token()
+    return access_record, None
+
+
+@app.get("/favorites")
+def favorites() -> Response | OAuthError:
+    access_record, authentication_error = validated_access_record()
+    if authentication_error is not None:
+        return authentication_error
+    if access_record is None:
+        return invalid_token()
+
+    # TODO: Inspect the validated access_record["resource_owner"] and return
+    #       ALICE_FAVORITES or BOB_FAVORITES for the exact matching identifier.
+    return jsonify(NO_DATA)
+
+
+if __name__ == "__main__":
+    initialize_schema()
+    app.run(host="localhost", port=9002, debug=False, use_reloader=False)

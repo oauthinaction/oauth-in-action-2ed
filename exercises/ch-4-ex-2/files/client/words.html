@@ -1,0 +1,108 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Words API Client</title>
+  <link rel="stylesheet" href="/assets/common.css">
+  <script src="/assets/common.js" defer></script>
+</head>
+<body class="client">
+  <header class="site-header">
+    <div class="header-inner">
+      <a class="brand" href="/">OAuth in Action</a>
+      <span class="service-label">Words API Client - localhost:9000</span>
+    </div>
+  </header>
+  <main>
+    <p class="visually-hidden" data-copy-status aria-live="polite"></p>
+    <section class="panel">
+      <h1>Words API</h1>
+      <p>
+        Current granted scope:
+        {% if scope %}
+          <span class="copyable-inline" data-copy-container>
+            <code data-copy-value>{{ scope }}</code>
+            <button class="copy-button" type="button" data-copy-button
+              aria-label="Copy current scope" title="Copy current scope">
+              <span class="copy-icon" aria-hidden="true"></span>
+            </button>
+          </span>
+        {% else %}
+          <span class="token value-missing">NONE</span>
+        {% endif %}
+      </p>
+      {% if result %}
+        <p class="operation-result" role="status">
+          <strong>Last operation:</strong> {{ result }}
+          {% if status_code is not none %}
+            <span class="copyable-inline" data-copy-container>
+              <code data-copy-value>{{ status_code }}</code>
+              <button class="copy-button" type="button" data-copy-button
+                aria-label="Copy response status" title="Copy response status">
+                <span class="copy-icon" aria-hidden="true"></span>
+              </button>
+            </span>
+          {% endif %}
+        </p>
+      {% endif %}
+    </section>
+
+    <div class="words-grid">
+      <section class="panel">
+        <h2>Read the current value</h2>
+        {% if timestamp is not none %}
+          <dl>
+            <dt>Words</dt>
+            <dd>
+              <span class="copyable-inline" data-copy-container>
+                <span class="token" data-copy-value>{{ words }}</span>
+                <button class="copy-button" type="button" data-copy-button
+                  aria-label="Copy words" title="Copy words">
+                  <span class="copy-icon" aria-hidden="true"></span>
+                </button>
+              </span>
+            </dd>
+            <dt>Timestamp</dt>
+            <dd>
+              <span class="copyable-inline" data-copy-container>
+                <span class="token" data-copy-value>{{ timestamp }}</span>
+                <button class="copy-button" type="button" data-copy-button
+                  aria-label="Copy timestamp" title="Copy timestamp">
+                  <span class="copy-icon" aria-hidden="true"></span>
+                </button>
+              </span>
+            </dd>
+          </dl>
+        {% else %}
+          <p class="muted">No successful GET result yet.</p>
+        {% endif %}
+        <div class="actions">
+          <a class="button button-read" href="/get_words">GET current words</a>
+        </div>
+      </section>
+
+      <section class="panel">
+        <h2>Add a word</h2>
+        <form action="/add_word" method="get">
+          <label for="word">Word to append</label>
+          <input id="word" name="word" type="text" autocomplete="off">
+          <button class="button button-write" type="submit">POST a word</button>
+        </form>
+      </section>
+
+      <section class="panel">
+        <h2>Remove the last word</h2>
+        <p class="muted">DELETE removes one word only when the list is nonempty.</p>
+        <div class="actions">
+          <a class="button button-deny" href="/delete_word">DELETE last word</a>
+        </div>
+      </section>
+    </div>
+
+    <div class="actions">
+      <a class="button button-secondary" href="/">Back to client tokens</a>
+    </div>
+  </main>
+</body>
+</html>

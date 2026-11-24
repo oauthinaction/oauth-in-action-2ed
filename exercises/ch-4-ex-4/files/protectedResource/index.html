@@ -1,0 +1,51 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Favorites Protected Resource</title>
+  <link rel="stylesheet" href="/assets/common.css">
+  <script src="/assets/common.js" defer></script>
+</head>
+<body class="resource">
+  <header class="site-header">
+    <div class="header-inner">
+      <a class="brand" href="/">OAuth in Action</a>
+      <span class="service-label">Favorites Resource - localhost:9002</span>
+    </div>
+  </header>
+  <main>
+    <p class="visually-hidden" data-copy-status aria-live="polite"></p>
+    <section class="panel">
+      <h1>Owner-bound Favorites resource</h1>
+      <p>
+        This server exposes
+        <span class="copyable-inline" data-copy-container>
+          <code data-copy-value>GET http://localhost:9002/favorites</code>
+          <button class="copy-button" type="button" data-copy-button
+            aria-label="Copy Favorites API request" title="Copy Favorites API request">
+            <span class="copy-icon" aria-hidden="true"></span>
+          </button>
+        </span>.
+      </p>
+      <p>
+        Send a valid access token in
+        <code>Authorization: Bearer ACCESS_TOKEN</code>. The completed exercise
+        reads the persisted <code>resource_owner</code> from that validated token
+        record and selects Alice's or Bob's favorites. It does not trust owner
+        input from the client request and does not filter categories by scope.
+      </p>
+      <p class="error muted">
+        Warning: Alice/Bob selection on the authorization page is an insecure
+        exercise fixture, not authentication. A real server must authenticate
+        the resource owner before binding identity to an authorization grant.
+      </p>
+      <p class="muted">
+        Invalid tokens receive <code>401 invalid_token</code>. The OAuth client
+        calls this endpoint server-to-server, so no CDN, Node dependency, or
+        browser CORS library is required.
+      </p>
+    </section>
+  </main>
+</body>
+</html>
